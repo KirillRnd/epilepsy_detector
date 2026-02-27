@@ -19,36 +19,6 @@
 
 ### Базовый загрузчик для .edf файлов
 
-```python
-import mne
-import numpy as np
-
-def load_edf_file(file_path, preload=True):
-    """
-    Загрузка .edf файла с помощью mne
-    
-    Параметры:
-    file_path (str): путь к .edf файлу
-    preload (bool): загружать данные в память сразу
-    
-    Возвращает:
-    raw (mne.io.Raw): объект с сырыми данными
-    """
-    # Загрузка файла
-    raw = mne.io.read_raw_edf(file_path, preload=preload)
-    
-    # Получение информации
-    sampling_freq = raw.info['sfreq']  # частота дискретизации
-    channel_names = raw.ch_names        # имена каналов
-    data = raw.get_data()               # данные в виде numpy массива
-    
-    return {
-        'raw': raw,
-        'data': data,
-        'sampling_freq': sampling_freq,
-        'channel_names': channel_names
-    }
-```
 
 ## Обработка .adicht файлов (LabChart)
 
@@ -79,68 +49,9 @@ def load_edf_file(file_path, preload=True):
 
 ### Базовый загрузчик для .adicht файлов
 
-```python
-import neo
-
-def load_adicht_file(file_path):
-    """
-    Загрузка .adicht файла с помощью neo
-    
-    Параметры:
-    file_path (str): путь к .adicht файлу
-    
-    Возвращает:
-    data (dict): словарь с данными и метаданными
-    """
-    try:
-        # Создание объекта для чтения
-        reader = neo.io.Spike2IO(filename=file_path)
-        
-        # Чтение блока данных
-        block = reader.read_block()
-        
-        # Извлечение данных
-        segments = block.segments
-        if len(segments) > 0:
-            segment = segments[0]  # Берем первый сегмент
-            analog_signals = segment.analogsignals
-            
-            # Преобразование в numpy массивы
-            signals_data = [signal.magnitude for signal in analog_signals]
-            sampling_rates = [signal.sampling_rate for signal in analog_signals]
-            channel_names = [signal.name for signal in analog_signals]
-            
-            return {
-                'signals': signals_data,
-                'sampling_rates': sampling_rates,
-                'channel_names': channel_names,
-                'segments': len(segments)
-            }
-    except Exception as e:
-        print(f"Ошибка при чтении файла {file_path}: {e}")
-        return None
-```
 
 ## Единый интерфейс для загрузки файлов
 
-```python
-def load_recording_file(file_path):
-    """
-    Универсальная функция для загрузки файлов .edf и .adicht
-    
-    Параметры:
-    file_path (str): путь к файлу
-    
-    Возвращает:
-    data (dict): словарь с данными и метаданными
-    """
-    if file_path.endswith('.edf'):
-        return load_edf_file(file_path)
-    elif file_path.endswith('.adicht'):
-        return load_adicht_file(file_path)
-    else:
-        raise ValueError(f"Неподдерживаемый формат файла: {file_path}")
-```
 
 ## Рекомендации по реализации
 
