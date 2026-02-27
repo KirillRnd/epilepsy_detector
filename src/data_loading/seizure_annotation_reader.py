@@ -98,14 +98,19 @@ class SeizureAnnotationReader:
         # 2. "start end" (например, "55.1 57.1")
         # 3. "start,end,label" (например, "55.1,57.1,seizure")
         
-        # Разделение по запятым или пробелам
-        parts = re.split(r'[,;\s]+', line)
+        # Сначала пробуем обработать формат с табуляцией или пробелами как разделителями
+        # и запятыми как десятичными разделителями
+        parts = re.split(r'[\t\s]+', line)
         parts = [p for p in parts if p]  # Удаление пустых элементов
         
         if len(parts) >= 2:
             try:
-                start_time = float(parts[0].replace(',', '.'))
-                end_time = float(parts[1].replace(',', '.'))
+                # Обработка чисел с десятичными запятыми
+                start_str = parts[0].replace(',', '.')
+                end_str = parts[1].replace(',', '.')
+                
+                start_time = float(start_str)
+                end_time = float(end_str)
                 
                 # Проверка корректности временных меток
                 if start_time >= 0 and end_time > start_time:
@@ -125,6 +130,32 @@ class SeizureAnnotationReader:
                     return seizure_data
             except ValueError:
                 # Игнорируем строки с некорректными числами
+                pass
+        
+        # Если первый способ не сработал, пробуем другой подход
+        # Разделение по запятым, но с учетом десятичных запятых
+        comma_parts = line.split(',')
+        if len(comma_parts) >= 2:
+            try:
+                # Попробуем интерпретировать как "start,end" или "start,end,label"
+                # где start и end могут содержать десятичные точки
+                if len(comma_parts) >= 2:
+                    # Проверяем, есть ли точка в первых двух частях
+                    if '.' in comma_parts[0] and '.' in comma_parts[1].split()[0]:
+                        start_time = float(comma_parts[0])
+                        end_time = float(comma_parts[1].split()[0])
+                        
+                        # Проверка корректности временных меток
+                        if start_time >= 0 and end_time > start_time:
+                            seizure_data = {
+                                'start': start_time,
+                                'end': end_time,
+                                'duration': end_time - start_time,
+                                'line_number': line_num,
+                                'label': comma_parts[2] if len(comma_parts) > 2 else 'seizure'
+                            }
+                            return seizure_data
+            except ValueError:
                 pass
         
         return None

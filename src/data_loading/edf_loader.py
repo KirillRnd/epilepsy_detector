@@ -39,12 +39,21 @@ class EDFLoader:
             raw = mne.io.read_raw_edf(file_path, preload=self.preload_data)
             
             # Извлечение метаданных
+            try:
+                duration = raw.times[-1] if len(raw.times) > 0 else 0
+            except Exception:
+                # Если не удается получить длительность из times, вычисляем из данных
+                try:
+                    duration = raw.n_times / raw.info['sfreq'] if raw.info['sfreq'] > 0 else 0
+                except Exception:
+                    duration = 0
+            
             metadata = {
                 'file_path': file_path,
                 'sampling_freq': raw.info['sfreq'],
                 'n_channels': len(raw.ch_names),
                 'channel_names': raw.ch_names,
-                'duration': raw.times[-1] if len(raw.times) > 0 else 0,
+                'duration': duration,
                 'raw_object': raw
             }
             
