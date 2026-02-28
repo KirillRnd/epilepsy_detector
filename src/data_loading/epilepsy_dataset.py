@@ -30,6 +30,19 @@ class EpilepsyDataset(Dataset):
         
         # Создание списка окон
         self.windows = self._create_windows()
+        
+                # Создаем кэш для хранения данных в памяти
+        self.data_cache = {}
+        
+        # Предзагрузка всех уникальных файлов
+        print("Предзагрузка данных в оперативную память...")
+        for animal_id, session_id, _, _, _ in self.windows:
+            cache_key = (animal_id, session_id)
+            if cache_key not in self.data_cache:
+                data_file = self.data_dir / animal_id / session_id / "processed_signals.npy"
+                # Загружаем и сохраняем в кэш
+                self.data_cache[cache_key] = np.load(data_file)
+        print("Предзагрузка завершена!")
     
     def _create_windows(self) -> List[Tuple[str, str, int, int, int]]:
         """
@@ -77,8 +90,8 @@ class EpilepsyDataset(Dataset):
         # Путь к файлу с данными
         data_file = self.data_dir / animal_id / session_id / "processed_signals.npy"
         
-        # Загрузка данных
-        data = np.load(data_file)
+        # Получаем данные из кэша в оперативной памяти
+        data = self.data_cache[(animal_id, session_id)]
         
         # Извлечение окна
         window_data = data[:, start_sample:end_sample]
