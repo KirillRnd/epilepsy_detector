@@ -86,4 +86,17 @@ class EpilepsyDataset(Dataset):
         # Преобразование в тензор
         window_tensor = torch.FloatTensor(window_data)
         
+        # Вычисляем текущую длину и необходимый паддинг
+        current_length = window_tensor.shape[1]
+        
+        if current_length < self.window_length:
+            pad_size = self.window_length - current_length
+            # F.pad принимает аргумент в виде (pad_left, pad_right) для последней размерности
+            # Добавляем нули только в конец (справа)
+            window_tensor = torch.nn.functional.pad(window_tensor, (0, pad_size), mode='constant', value=0.0)
+            
+        elif current_length > self.window_length:
+            # На всякий случай, если окно вдруг оказалось больше (обрезаем лишнее)
+            window_tensor = window_tensor[:, :self.window_length]
+        
         return window_tensor, label

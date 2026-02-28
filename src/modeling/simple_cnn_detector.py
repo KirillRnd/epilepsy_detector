@@ -373,9 +373,6 @@ class MinimalEEGDetector(nn.Module):
                  window_length: int = 2000,  # 5 секунд при 400 Гц
                  num_classes: int = 2):
         """
-        Инициализация минимальной модели
-        
-        Параметры:
         input_channels (int): количество каналов ЭЭГ
         window_length (int): длина временного окна в отсчетах
         num_classes (int): количество классов (2 для бинарной классификации)
@@ -393,27 +390,31 @@ class MinimalEEGDetector(nn.Module):
         self.conv2 = nn.Conv1d(12, 24, kernel_size=8, stride=3, padding=4)
         self.bn2 = nn.BatchNorm1d(24)
         
-        # Вычисление размера после сверток
+        # Вычисление размера после сверток и пулингов
         conv_output_size = self._calculate_conv_output_size()
         
         # Минимальный полносвязный слой
-        self.fc = nn.Linear(8 * conv_output_size, num_classes)
-        
+        # ИСПРАВЛЕНИЕ: conv2 выдает 24 канала, поэтому умножаем conv_output_size на 24
+        self.fc = nn.Linear(24 * conv_output_size, num_classes)
         # Инициализация весов
         self._initialize_weights()
     
     def _calculate_conv_output_size(self):
         """
-        Вычисление размера выхода после сверточных слоев
+        Вычисление размера выхода после сверточных слоев и слоев пулинга
         """
         # Размер после каждого слоя
         size = self.window_length
         
         # Conv1: kernel=16, stride=6, padding=8
         size = (size + 2 * 8 - 16) // 6 + 1
+        # ИСПРАВЛЕНИЕ: Учитываем первый max_pool1d(x, 2)
+        size = size // 2
         
         # Conv2: kernel=8, stride=3, padding=4
         size = (size + 2 * 4 - 8) // 3 + 1
+        # ИСПРАВЛЕНИЕ: Учитываем второй max_pool1d(x, 2)
+        size = size // 2
         
         return size
     
