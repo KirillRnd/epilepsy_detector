@@ -7,7 +7,7 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import numpy as np
 from typing import Optional
 
-from .simple_cnn_detector import SimpleEEGDetector, ImprovedEEGDetector
+from .simple_cnn_detector import SimpleEEGDetector, ImprovedEEGDetector, MinimalEEGDetector
 
 class EpilepsyDetector(pl.LightningModule):
     """
@@ -22,6 +22,7 @@ class EpilepsyDetector(pl.LightningModule):
                  learning_rate: float = 0.001,
                  weight_decay: float = 1e-4,
                  use_improved_architecture: bool = False,
+                 use_minimal_architecture: bool = False,
                  class_weights: Optional[list] = None):
         """
         Инициализация модели
@@ -34,13 +35,20 @@ class EpilepsyDetector(pl.LightningModule):
         learning_rate (float): скорость обучения
         weight_decay (float): коэффициент регуляризации L2
         use_improved_architecture (bool): использовать улучшенную архитектуру
+        use_minimal_architecture (bool): использовать минимальную архитектуру
         class_weights (list): веса классов для балансировки
         """
         super().__init__()
         self.save_hyperparameters()
         
         # Инициализация модели
-        if use_improved_architecture:
+        if use_minimal_architecture:
+            self.model = MinimalEEGDetector(
+                input_channels=input_channels,
+                window_length=window_length,
+                num_classes=num_classes
+            )
+        elif use_improved_architecture:
             self.model = ImprovedEEGDetector(
                 input_channels=input_channels,
                 window_length=window_length,
@@ -57,7 +65,8 @@ class EpilepsyDetector(pl.LightningModule):
         
         # Параметры обучения
         self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
+        # Убедимся, что weight_decay является числом с плавающей точкой
+        self.weight_decay = float(weight_decay)
         
         # Веса классов
         if class_weights is not None:
@@ -65,10 +74,9 @@ class EpilepsyDetector(pl.LightningModule):
         else:
             self.class_weights = None
         
-        # Метрики
-        self.train_losses = []
-        self.val_losses = []
-        self.test_losses = []
+        # Хранилище для результатов валидации и тестирования
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
     
     def forward(self, x):
         """
@@ -90,17 +98,16 @@ class EpilepsyDetector(pl.LightningModule):
         dict: конфигурация оптимизатора и планировщика
         """
         optimizer = torch.optim.Adam(
-            self.parameters(), 
-            lr=self.learning_rate, 
-            weight_decay=self.weight_decay
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=float(self.weight_decay)
         )
         
         scheduler = ReduceLROnPlateau(
-            optimizer, 
-            mode='min', 
-            patience=5, 
-            factor=0.5, 
-            verbose=True
+            optimizer,
+            mode='min',
+            patience=5,
+            factor=0.5
         )
         
         return {
@@ -179,18 +186,21 @@ class EpilepsyDetector(pl.LightningModule):
         self.log('val_loss', loss, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         self.log('val_acc', acc, on_step=False, on_epoch=True, prog_bar=True, logger=True)
         
+        # Сохраняем результаты для обработки в конце эпохи
+        self.validation_step_outputs.append({'preds': preds, 'targets': y})
+        
         return {'val_loss': loss, 'val_acc': acc, 'preds': preds, 'targets': y}
     
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
         """
         Обработка результатов валидации в конце эпохи
-        
-        Параметры:
-        outputs (list): список результатов шагов валидации
         """
         # Объединение предсказаний и целевых значений
-        all_preds = torch.cat([x['preds'] for x in outputs])
-        all_targets = torch.cat([x['targets'] for x in outputs])
+        all_preds = torch.cat([x['preds'] for x in self.validation_step_outputs])
+        all_targets = torch.cat([x['targets'] for x in self.validation_step_outputs])
+        
+        # Очистка хранилища
+        self.validation_step_outputs.clear()
         
         # Вычисление метрик
         preds_np = all_preds.cpu().numpy()
@@ -249,25 +259,29 @@ class EpilepsyDetector(pl.LightningModule):
         
         # Возвращаем предсказания и вероятности для вычисления ROC AUC
         probs = F.softmax(outputs, dim=1)
+        
+        # Сохраняем результаты для обработки в конце эпохи
+        self.test_step_outputs.append({'preds': preds, 'targets': y, 'probs': probs})
+        
         return {
-            'test_loss': loss, 
-            'test_acc': acc, 
-            'preds': preds, 
+            'test_loss': loss,
+            'test_acc': acc,
+            'preds': preds,
             'targets': y,
             'probs': probs
         }
     
-    def test_epoch_end(self, outputs):
+    def on_test_epoch_end(self):
         """
         Обработка результатов тестирования в конце эпохи
-        
-        Параметры:
-        outputs (list): список результатов шагов тестирования
         """
         # Объединение предсказаний, целевых значений и вероятностей
-        all_preds = torch.cat([x['preds'] for x in outputs])
-        all_targets = torch.cat([x['targets'] for x in outputs])
-        all_probs = torch.cat([x['probs'] for x in outputs])
+        all_preds = torch.cat([x['preds'] for x in self.test_step_outputs])
+        all_targets = torch.cat([x['targets'] for x in self.test_step_outputs])
+        all_probs = torch.cat([x['probs'] for x in self.test_step_outputs])
+        
+        # Очистка хранилища
+        self.test_step_outputs.clear()
         
         # Вычисление метрик
         preds_np = all_preds.cpu().numpy()

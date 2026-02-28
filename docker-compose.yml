@@ -6,6 +6,7 @@ services:
     container_name: epilepsy-detector
     ports:
       - "8888:8888"
+      - "6006:6006"
     volumes:
       - type: bind
         source: .

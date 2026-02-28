@@ -93,8 +93,40 @@ class EpilepsyDataModule(pl.LightningDataModule):
         np.random.seed(self.seed)
         np.random.shuffle(unique_animals)
         
-        n_train = int(len(unique_animals) * self.train_animal_ratio)
-        n_val = int(len(unique_animals) * self.val_animal_ratio)
+        n_total = len(unique_animals)
+        n_train = int(n_total * self.train_animal_ratio)
+        n_val = int(n_total * self.val_animal_ratio)
+        
+        # Убедимся, что каждый сплит имеет хотя бы одно животное, если это возможно
+        if n_total >= 3:  # Если у нас 3 или больше животных
+            # Корректируем размеры, если какой-то сплит пустой
+            if n_train == 0 and self.train_animal_ratio > 0:
+                n_train = 1
+            if n_val == 0 and self.val_animal_ratio > 0:
+                n_val = 1
+            
+            # Убедимся, что сумма не превышает общее количество
+            if n_train + n_val >= n_total:
+                # Распределяем животных пропорционально
+                n_train = max(1, int(n_total * self.train_animal_ratio))
+                n_val = max(1, min(n_total - n_train - 1, int(n_total * self.val_animal_ratio)))
+                # Если после коррекции валидация все еще пустая, но ratio > 0, даем ей 1
+                if n_val == 0 and self.val_animal_ratio > 0 and n_total > n_train + 1:
+                    n_val = 1
+        
+        # Убедимся, что индексы не выходят за пределы массива
+        n_train = min(n_train, n_total)
+        remaining_for_val = max(0, n_total - n_train)
+        n_val = min(n_val, remaining_for_val)
+        
+        # Убедимся, что у нас есть хотя бы по одному животному в каждом сплите, если возможно
+        if n_total >= 3:
+            if n_train == 0 and self.train_animal_ratio > 0:
+                n_train = 1
+            if n_val == 0 and self.val_animal_ratio > 0 and remaining_for_val > 0:
+                n_val = 1
+            if n_total - n_train - n_val == 0 and self.val_animal_ratio > 0 and n_val > 1:
+                n_val = max(1, n_val - 1)
         
         train_animals = unique_animals[:n_train]
         val_animals = unique_animals[n_train:n_train+n_val]

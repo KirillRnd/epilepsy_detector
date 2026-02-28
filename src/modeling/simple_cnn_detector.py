@@ -363,7 +363,103 @@ def validate_epoch(model, dataloader, criterion, device, class_weights=None):
     return avg_loss, accuracy, all_predictions, all_targets
 
 
-def train_model(model, train_loader, val_loader, 
+class MinimalEEGDetector(nn.Module):
+    """
+    Минимальная 1D-CNN модель для тестирования с ~10,000 параметрами
+    """
+    
+    def __init__(self,
+                 input_channels: int = 4,
+                 window_length: int = 2000,  # 5 секунд при 400 Гц
+                 num_classes: int = 2):
+        """
+        Инициализация минимальной модели
+        
+        Параметры:
+        input_channels (int): количество каналов ЭЭГ
+        window_length (int): длина временного окна в отсчетах
+        num_classes (int): количество классов (2 для бинарной классификации)
+        """
+        super(MinimalEEGDetector, self).__init__()
+        
+        self.input_channels = input_channels
+        self.window_length = window_length
+        self.num_classes = num_classes
+        
+        # Очень простая сверточная архитектура
+        self.conv1 = nn.Conv1d(input_channels, 12, kernel_size=16, stride=6, padding=8)
+        self.bn1 = nn.BatchNorm1d(12)
+        
+        self.conv2 = nn.Conv1d(12, 24, kernel_size=8, stride=3, padding=4)
+        self.bn2 = nn.BatchNorm1d(24)
+        
+        # Вычисление размера после сверток
+        conv_output_size = self._calculate_conv_output_size()
+        
+        # Минимальный полносвязный слой
+        self.fc = nn.Linear(8 * conv_output_size, num_classes)
+        
+        # Инициализация весов
+        self._initialize_weights()
+    
+    def _calculate_conv_output_size(self):
+        """
+        Вычисление размера выхода после сверточных слоев
+        """
+        # Размер после каждого слоя
+        size = self.window_length
+        
+        # Conv1: kernel=16, stride=6, padding=8
+        size = (size + 2 * 8 - 16) // 6 + 1
+        
+        # Conv2: kernel=8, stride=3, padding=4
+        size = (size + 2 * 4 - 8) // 3 + 1
+        
+        return size
+    
+    def _initialize_weights(self):
+        """
+        Инициализация весов модели
+        """
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+    
+    def forward(self, x):
+        """
+        Прямой проход через сеть
+        
+        Параметры:
+        x (torch.Tensor): входные данные (batch_size, channels, time)
+        
+        Возвращает:
+        torch.Tensor: выходные логиты
+        """
+        # Сверточные слои с активацией и нормализацией
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.max_pool1d(x, 2)
+        
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = F.max_pool1d(x, 2)
+        
+        # Преобразование для полносвязного слоя
+        x = x.view(x.size(0), -1)
+        
+        # Выходной слой
+        x = self.fc(x)
+        
+        return x
+
+
+def train_model(model, train_loader, val_loader,
                 num_epochs=50, learning_rate=0.001,
                 class_weights=None, device='cpu'):
     """
@@ -396,6 +492,128 @@ def train_model(model, train_loader, val_loader,
         'train_acc': [],
         'val_loss': [],
         'val_acc': []
+    }
+    
+    
+    # Рекомендуемые параметры минимальной модели
+    MINIMAL_MODEL_CONFIG = {
+        'input_channels': 4,           # Количество каналов ЭЭГ
+        'window_length': 2000,          # Длина окна (5 сек при 400 Гц)
+        'num_classes': 2,              # Бинарная классификация
+        'learning_rate': 0.001,       # Скорость обучения
+        'batch_size': 64,              # Размер батча
+        'num_epochs': 50,               # Количество эпох
+        'weight_decay': 1e-4,          # Регуляризация L2
+        'patience': 10                 # Терпение для early stopping
+    }
+    
+    
+    class MinimalEEGDetector(nn.Module):
+        """
+        Минимальная 1D-CNN модель для тестирования с ~10,000 параметрами
+        """
+        
+        def __init__(self,
+                     input_channels: int = 4,
+                     window_length: int = 2000,  # 5 секунд при 400 Гц
+                     num_classes: int = 2):
+            """
+            Инициализация минимальной модели
+            
+            Параметры:
+            input_channels (int): количество каналов ЭЭГ
+            window_length (int): длина временного окна в отсчетах
+            num_classes (int): количество классов (2 для бинарной классификации)
+            """
+            super(MinimalEEGDetector, self).__init__()
+            
+            self.input_channels = input_channels
+            self.window_length = window_length
+            self.num_classes = num_classes
+            
+            # Очень простая сверточная архитектура
+            self.conv1 = nn.Conv1d(input_channels, 16, kernel_size=16, stride=4, padding=8)
+            self.bn1 = nn.BatchNorm1d(16)
+            
+            self.conv2 = nn.Conv1d(16, 32, kernel_size=8, stride=2, padding=4)
+            self.bn2 = nn.BatchNorm1d(32)
+            
+            # Вычисление размера после сверток
+            conv_output_size = self._calculate_conv_output_size()
+            
+            # Минимальный полносвязный слой
+            self.fc = nn.Linear(32 * conv_output_size, num_classes)
+            
+            # Инициализация весов
+            self._initialize_weights()
+        
+        def _calculate_conv_output_size(self):
+            """
+            Вычисление размера выхода после сверточных слоев
+            """
+            # Размер после каждого слоя
+            size = self.window_length
+            
+            # Conv1: kernel=16, stride=4, padding=8
+            size = (size + 2 * 8 - 16) // 4 + 1
+            
+            # Conv2: kernel=8, stride=2, padding=4
+            size = (size + 2 * 4 - 8) // 2 + 1
+            
+            return size
+        
+        def _initialize_weights(self):
+            """
+            Инициализация весов модели
+            """
+            for m in self.modules():
+                if isinstance(m, nn.Conv1d):
+                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                    if m.bias is not None:
+                        nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.BatchNorm1d):
+                    nn.init.constant_(m.weight, 1)
+                    nn.init.constant_(m.bias, 0)
+                elif isinstance(m, nn.Linear):
+                    nn.init.normal_(m.weight, 0, 0.01)
+                    nn.init.constant_(m.bias, 0)
+        
+        def forward(self, x):
+            """
+            Прямой проход через сеть
+            
+            Параметры:
+            x (torch.Tensor): входные данные (batch_size, channels, time)
+            
+            Возвращает:
+            torch.Tensor: выходные логиты
+            """
+            # Сверточные слои с активацией и нормализацией
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = F.max_pool1d(x, 2)
+            
+            x = F.relu(self.bn2(self.conv2(x)))
+            x = F.max_pool1d(x, 2)
+            
+            # Преобразование для полносвязного слоя
+            x = x.view(x.size(0), -1)
+            
+            # Выходной слой
+            x = self.fc(x)
+            
+            return x
+    
+    
+    # Рекомендуемые параметры минимальной модели
+    MINIMAL_MODEL_CONFIG = {
+        'input_channels': 4,           # Количество каналов ЭЭГ
+        'window_length': 2000,          # Длина окна (5 сек при 400 Гц)
+        'num_classes': 2,              # Бинарная классификация
+        'learning_rate': 0.001,       # Скорость обучения
+        'batch_size': 64,              # Размер батча
+        'num_epochs': 50,               # Количество эпох
+        'weight_decay': 1e-4,          # Регуляризация L2
+        'patience': 10                 # Терпение для early stopping
     }
     
     best_val_loss = float('inf')
