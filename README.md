@@ -134,3 +134,4 @@ tensorboard --logdir experiments/exp_001/logs
 - Precision
 - Recall
 - F1-Score
+- Confusion matrix
