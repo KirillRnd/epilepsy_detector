@@ -34,6 +34,6 @@ training:
 experiment:
   seed: 42
   device: "cuda"  # или "cuda"
-  output_dir: "experiments/minimal_exp_001"
-  checkpoint_dir: "experiments/minimal_exp_001/checkpoints"
-  log_dir: "experiments/minimal_exp_001/logs"
+  output_dir: "experiments/exp_001"
+  checkpoint_dir: "experiments/exp_001/checkpoints"
+  log_dir: "experiments/exp_001/logs"

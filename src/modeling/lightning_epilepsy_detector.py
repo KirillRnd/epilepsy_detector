@@ -7,6 +7,8 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import numpy as np
 from typing import Optional
 import torchmetrics
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 from .simple_cnn_detector import SimpleEEGDetector, ImprovedEEGDetector, MinimalEEGDetector, MinimalEEGDetector_v2, MinimalEEGDetector_ESN
        
@@ -75,6 +77,10 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_recall = torchmetrics.classification.BinaryRecall(threshold=self.threshold)
         self.val_recall = torchmetrics.classification.BinaryRecall(threshold=self.threshold)
         self.test_recall = torchmetrics.classification.BinaryRecall(threshold=self.threshold)
+
+        self.train_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
+        self.val_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
+        self.test_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
     
     def forward(self, x):
         return self.model(x)
@@ -140,6 +146,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_f1.update(probs_flat, y_flat)
         self.train_precision.update(probs_flat, y_flat)
         self.train_recall.update(probs_flat, y_flat)
+        self.train_confmat.update(probs_flat, y_flat)
 
         self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
         self.log("train_acc", self.train_acc, prog_bar=False, on_step=False, on_epoch=True)
@@ -160,6 +167,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.val_f1.update(probs_flat, y_flat)
         self.val_precision.update(probs_flat, y_flat)
         self.val_recall.update(probs_flat, y_flat)
+        self.val_confmat.update(probs_flat, y_flat)
 
         self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
         self.log("val_acc", self.val_acc, prog_bar=False, on_step=False, on_epoch=True)
@@ -180,6 +188,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.test_f1.update(probs_flat, y_flat)
         self.test_precision.update(probs_flat, y_flat)
         self.test_recall.update(probs_flat, y_flat)
+        self.test_confmat.update(probs_flat, y_flat)
 
         self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
         self.log("test_acc", self.test_acc, prog_bar=False, on_step=False, on_epoch=True)
@@ -191,23 +200,70 @@ class EpilepsyDetector_v2(pl.LightningModule):
         
     def on_train_epoch_end(self):
 
+        confmat = self.train_confmat.compute()
+
+        fig, ax = plt.subplots()
+        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+                    xticklabels=["pred 0", "pred 1"],
+                    yticklabels=["true 0", "true 1"],
+                    ax=ax)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+    
+        tb = self.logger.experiment      # TensorBoardLogger
+        tb.add_figure("train/confusion_matrix", fig, global_step=self.current_epoch)
+        plt.close(fig)
+        
         self.train_acc.reset()
         self.train_f1.reset()
         self.train_precision.reset()
         self.train_recall.reset()
+        self.train_confmat.reset()
 
     def on_validation_epoch_end(self):
 
         if self.trainer.sanity_checking:
             return
         
+        confmat = self.val_confmat.compute()
+
+        fig, ax = plt.subplots()
+        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+                    xticklabels=["pred 0", "pred 1"],
+                    yticklabels=["true 0", "true 1"],
+                    ax=ax)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+    
+        tb = self.logger.experiment      # TensorBoardLogger
+        tb.add_figure("val/confusion_matrix", fig, global_step=self.current_epoch)
+        plt.close(fig)
+    
         self.val_acc.reset()
         self.val_f1.reset()
         self.val_precision.reset()
         self.val_recall.reset()
+        self.val_confmat.reset()
 
     def on_test_epoch_end(self):
+        confmat = self.test_confmat.compute()
+        
+
+        fig, ax = plt.subplots()
+        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+                    xticklabels=["pred 0", "pred 1"],
+                    yticklabels=["true 0", "true 1"],
+                    ax=ax)
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("True")
+    
+        tb = self.logger.experiment      # TensorBoardLogger
+        tb.add_figure("test/confusion_matrix", fig, global_step=self.current_epoch)
+        plt.close(fig)
+        #self.log("test_confmat", confmat)
+        
         self.test_acc.reset()
         self.test_f1.reset()
         self.test_precision.reset()
         self.test_recall.reset()
+        self.test_confmat.reset()
