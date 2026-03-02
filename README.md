@@ -83,8 +83,7 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  use_minimal_architecture: true
-  use_improved_architecture: false
+  model_name: "minimal_v2"  # Доступные модели: "minimal_v2", "ESN"
   class_weights: [1.0, 3.0]  # Веса для нормы и приступов
 
 # Параметры обучения
