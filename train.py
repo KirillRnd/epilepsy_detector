@@ -18,7 +18,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.data_loading.epilepsy_datamodule import EpilepsyDataModule
-from src.modeling.lightning_epilepsy_detector import EpilepsyDetector
+from src.modeling.lightning_epilepsy_detector import EpilepsyDetector, EpilepsyDetector_v2
 from src.preprocessing.lightning_class_balancer import compute_class_weights
 
 
@@ -72,6 +72,9 @@ def main():
         overlap=config['data']['overlap'],
         train_animal_ratio=config['data']['train_animal_ratio'],
         val_animal_ratio=config['data']['val_animal_ratio'],
+        train_animals=config['data'].get('train_animals'),
+        val_animals=config['data'].get('val_animals'),
+        test_animals=config['data'].get('test_animals'),
         seed=config['experiment']['seed']
     )
     
@@ -80,7 +83,7 @@ def main():
     data_module.setup(stage='fit')
     
     # Создание модели
-    model = EpilepsyDetector(
+    model = EpilepsyDetector_v2(
         input_channels=config['model']['input_channels'],
         window_length=config['model']['window_length'],
         num_classes=config['model']['num_classes'],

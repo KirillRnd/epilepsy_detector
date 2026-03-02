@@ -459,6 +459,197 @@ class MinimalEEGDetector(nn.Module):
         
         return x
 
+class MinimalEEGDetector_v2(nn.Module):
+    """
+    Минимальная fully-conv 1D-CNN для детекции seizure по каждому семплу окна.
+    Вход:  (B, C=3, T=2000)
+    Выход: (B, T=2000) logits
+    """
+
+    def __init__(self, input_channels: int = 3, hidden: int = 16, dropout: float = 0.1):
+        super().__init__()
+
+        self.features = nn.Sequential(
+            nn.Conv1d(input_channels, hidden, kernel_size=9, padding=4, bias=False),
+            nn.BatchNorm1d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+
+            nn.Conv1d(hidden, hidden, kernel_size=9, padding=4, bias=False),
+            nn.BatchNorm1d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+
+            nn.Conv1d(hidden, hidden // 2, kernel_size=5, padding=2, bias=False),
+            nn.BatchNorm1d(hidden // 2),
+            nn.ReLU(inplace=True),
+        )
+
+        # 1x1 conv: превращаем признаки в 1 логит на каждый момент времени
+        self.head = nn.Conv1d(hidden // 2, 1, kernel_size=1)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (B, C, T)
+        returns logits: (B, T)
+        """
+        x = self.features(x)          # (B, H, T)
+        x = self.head(x)              # (B, 1, T)
+        x = x.squeeze(1)              # (B, T)
+        return x
+
+class ESNLayer(nn.Module):
+    def __init__(
+        self,
+        input_size: int,        # C
+        reservoir_size: int,    # H
+        leaking_rate: float = 1.0,
+        spectral_radius: float = 0.9,
+        input_scale: float = 1.0,
+        bias: bool = True,
+        train_reservoir: bool = False,
+    ):
+        super().__init__()
+
+        self.input_size = input_size
+        self.reservoir_size = reservoir_size
+        self.leaking_rate = leaking_rate
+
+        # W_in: (H, C)
+        self.W_in = nn.Parameter(
+            torch.empty(reservoir_size, input_size),
+            requires_grad=train_reservoir
+        )
+        # W_res: (H, H)
+        self.W_res = nn.Parameter(
+            torch.empty(reservoir_size, reservoir_size),
+            requires_grad=train_reservoir
+        )
+        if bias:
+            self.b = nn.Parameter(torch.zeros(reservoir_size),
+                                  requires_grad=train_reservoir)
+        else:
+            self.register_parameter("b", None)
+
+        self.input_scale = input_scale
+        self.spectral_radius = spectral_radius
+
+        self.reset_parameters()
+
+    @torch.no_grad()
+    def reset_parameters(self):
+        # случайная инициализация
+        nn.init.normal_(self.W_in, mean=0.0, std=self.input_scale)
+        nn.init.normal_(self.W_res, mean=0.0, std=1.0)
+
+        # нормируем на заданный spectral_radius
+        # оцениваем спектральный радиус по максимальному сингулярному значению
+        # (приближение, но на практике достаточно)
+        u, s, v = torch.svd(self.W_res)
+        if s[0] > 0:
+            self.W_res.data *= self.spectral_radius / s[0]
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: (B, C, T)
+        return: states: (B, H, T)
+        """
+        B, C, T = x.shape
+        device = x.device
+
+        # (B, T, C)
+        x_t = x.permute(0, 2, 1)
+
+        # начальное состояние резервуара
+        h = torch.zeros(B, self.reservoir_size, device=device)
+
+        states = []
+
+        for t in range(T):
+            u_t = x_t[:, t, :]  # (B, C)
+
+            pre = F.linear(u_t, self.W_in) + F.linear(h, self.W_res)
+            if self.b is not None:
+                pre = pre + self.b
+
+            pre = torch.tanh(pre)
+
+            # leaky integration
+            h = (1.0 - self.leaking_rate) * h + self.leaking_rate * pre
+
+            states.append(h.unsqueeze(2))  # (B, H, 1)
+
+        # (B, H, T)
+        states = torch.cat(states, dim=2)
+        return states
+
+class MinimalEEGDetector_ESN(nn.Module):
+    def __init__(self,
+                 input_channels: int = 3,
+                 esn_hidden: int = 32,
+                 conv_hidden: int = 16,
+                 dropout: float = 0.1):
+        super().__init__()
+
+        self.esn = ESNLayer(
+            input_size=input_channels,
+            reservoir_size=esn_hidden,
+            leaking_rate=0.3,
+            spectral_radius=0.9,
+            input_scale=0.5,
+            bias=True,
+            train_reservoir=False,  # сначала можно заморозить
+        )
+
+        hidden = conv_hidden
+        self.features = nn.Sequential(
+            nn.Conv1d(esn_hidden, hidden, kernel_size=9, padding=4, bias=False),
+            nn.BatchNorm1d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+
+            nn.Conv1d(hidden, hidden, kernel_size=9, padding=4, bias=False),
+            nn.BatchNorm1d(hidden),
+            nn.ReLU(inplace=True),
+            nn.Dropout(dropout),
+
+            nn.Conv1d(hidden, hidden // 2, kernel_size=5, padding=2, bias=False),
+            nn.BatchNorm1d(hidden // 2),
+            nn.ReLU(inplace=True),
+        )
+
+        self.head = nn.Conv1d(hidden // 2, 1, kernel_size=1)
+        self._init_weights()
+
+    def _init_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, nonlinearity="relu")
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, C, T)
+        x = self.esn(x)          # (B, esn_hidden, T)
+        x = self.features(x)     # (B, H, T)
+        x = self.head(x)         # (B, 1, T)
+        x = x.squeeze(1)         # (B, T)
+        return x
 
 def train_model(model, train_loader, val_loader,
                 num_epochs=50, learning_rate=0.001,
@@ -493,128 +684,6 @@ def train_model(model, train_loader, val_loader,
         'train_acc': [],
         'val_loss': [],
         'val_acc': []
-    }
-    
-    
-    # Рекомендуемые параметры минимальной модели
-    MINIMAL_MODEL_CONFIG = {
-        'input_channels': 4,           # Количество каналов ЭЭГ
-        'window_length': 2000,          # Длина окна (5 сек при 400 Гц)
-        'num_classes': 2,              # Бинарная классификация
-        'learning_rate': 0.001,       # Скорость обучения
-        'batch_size': 64,              # Размер батча
-        'num_epochs': 50,               # Количество эпох
-        'weight_decay': 1e-4,          # Регуляризация L2
-        'patience': 10                 # Терпение для early stopping
-    }
-    
-    
-    class MinimalEEGDetector(nn.Module):
-        """
-        Минимальная 1D-CNN модель для тестирования с ~10,000 параметрами
-        """
-        
-        def __init__(self,
-                     input_channels: int = 4,
-                     window_length: int = 2000,  # 5 секунд при 400 Гц
-                     num_classes: int = 2):
-            """
-            Инициализация минимальной модели
-            
-            Параметры:
-            input_channels (int): количество каналов ЭЭГ
-            window_length (int): длина временного окна в отсчетах
-            num_classes (int): количество классов (2 для бинарной классификации)
-            """
-            super(MinimalEEGDetector, self).__init__()
-            
-            self.input_channels = input_channels
-            self.window_length = window_length
-            self.num_classes = num_classes
-            
-            # Очень простая сверточная архитектура
-            self.conv1 = nn.Conv1d(input_channels, 16, kernel_size=16, stride=4, padding=8)
-            self.bn1 = nn.BatchNorm1d(16)
-            
-            self.conv2 = nn.Conv1d(16, 32, kernel_size=8, stride=2, padding=4)
-            self.bn2 = nn.BatchNorm1d(32)
-            
-            # Вычисление размера после сверток
-            conv_output_size = self._calculate_conv_output_size()
-            
-            # Минимальный полносвязный слой
-            self.fc = nn.Linear(32 * conv_output_size, num_classes)
-            
-            # Инициализация весов
-            self._initialize_weights()
-        
-        def _calculate_conv_output_size(self):
-            """
-            Вычисление размера выхода после сверточных слоев
-            """
-            # Размер после каждого слоя
-            size = self.window_length
-            
-            # Conv1: kernel=16, stride=4, padding=8
-            size = (size + 2 * 8 - 16) // 4 + 1
-            
-            # Conv2: kernel=8, stride=2, padding=4
-            size = (size + 2 * 4 - 8) // 2 + 1
-            
-            return size
-        
-        def _initialize_weights(self):
-            """
-            Инициализация весов модели
-            """
-            for m in self.modules():
-                if isinstance(m, nn.Conv1d):
-                    nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0)
-                elif isinstance(m, nn.BatchNorm1d):
-                    nn.init.constant_(m.weight, 1)
-                    nn.init.constant_(m.bias, 0)
-                elif isinstance(m, nn.Linear):
-                    nn.init.normal_(m.weight, 0, 0.01)
-                    nn.init.constant_(m.bias, 0)
-        
-        def forward(self, x):
-            """
-            Прямой проход через сеть
-            
-            Параметры:
-            x (torch.Tensor): входные данные (batch_size, channels, time)
-            
-            Возвращает:
-            torch.Tensor: выходные логиты
-            """
-            # Сверточные слои с активацией и нормализацией
-            x = F.relu(self.bn1(self.conv1(x)))
-            x = F.max_pool1d(x, 2)
-            
-            x = F.relu(self.bn2(self.conv2(x)))
-            x = F.max_pool1d(x, 2)
-            
-            # Преобразование для полносвязного слоя
-            x = x.view(x.size(0), -1)
-            
-            # Выходной слой
-            x = self.fc(x)
-            
-            return x
-    
-    
-    # Рекомендуемые параметры минимальной модели
-    MINIMAL_MODEL_CONFIG = {
-        'input_channels': 4,           # Количество каналов ЭЭГ
-        'window_length': 2000,          # Длина окна (5 сек при 400 Гц)
-        'num_classes': 2,              # Бинарная классификация
-        'learning_rate': 0.001,       # Скорость обучения
-        'batch_size': 64,              # Размер батча
-        'num_epochs': 50,               # Количество эпох
-        'weight_decay': 1e-4,          # Регуляризация L2
-        'patience': 10                 # Терпение для early stopping
     }
     
     best_val_loss = float('inf')
