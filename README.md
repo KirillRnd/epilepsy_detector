@@ -50,6 +50,7 @@ data/processed/
 │   ├── <session_id>/
 │   │   ├── processed_signals.npy
 │   │   ├── seizure_mask.npy
+│   │   ├── conversion_metadata.json
 │   │   └── segments_info.csv
 └── conversion_summary.csv
 ```
@@ -61,6 +62,9 @@ data/processed/
 Перед запуском обучения необходимо настроить параметры в файле `experiments/config.yaml`:
 
 ```yaml
+# Конфигурационный файл для эксперимента с минимальной архитектурой
+
+# Параметры данных
 data:
   data_dir: "data/processed"
   window_length: 2000  # 5 секунд при 400 Гц
@@ -68,24 +72,32 @@ data:
   overlap: 0.5
   train_animal_ratio: 0.7
   val_animal_ratio: 0.15
+  # Жёсткое разбиение (если задано, то используется вместо случайного)
+  train_animals: ["Ati5x1", "Dex1x2NE", "Ati5y2"]  # Список ID животных для обучения
+  val_animals: ["Ati5y1"]    # Список ID животных для валидации
+  test_animals: ["Dex4x5"]   # Список ID животных для тестирования
 
+# Параметры модели
 model:
-  input_channels: 4
+  input_channels: 3
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
+  use_minimal_architecture: true
   use_improved_architecture: false
-  class_weights: [1.0, 3.0]
+  class_weights: [1.0, 3.0]  # Веса для нормы и приступов
 
+# Параметры обучения
 training:
   learning_rate: 0.001
-  num_epochs: 100
+  num_epochs: 50
   weight_decay: 1e-4
   patience: 10
 
+# Параметры эксперимента
 experiment:
   seed: 42
-  device: "cuda"
+  device: "cuda"  # или "cuda"
   output_dir: "experiments/exp_001"
   checkpoint_dir: "experiments/exp_001/checkpoints"
   log_dir: "experiments/exp_001/logs"
@@ -99,11 +111,6 @@ experiment:
 python train.py --config experiments/config.yaml
 ```
 
-Для запуска обучения с последующим тестированием:
-
-```bash
-python train.py --config experiments/config.yaml --test
-```
 
 ## Мониторинг обучения
 
@@ -117,8 +124,8 @@ tensorboard --logdir experiments/exp_001/logs
 
 Проект поддерживает две архитектуры моделей:
 
-1. **SimpleEEGDetector** - базовая 1D-CNN архитектура
-2. **ImprovedEEGDetector** - улучшенная архитектура с остаточными блоками
+1. **MinimalEEGDetector_v2** - базовая 1D-CNN архитектура
+2. **MinimalEEGDetector_ESN** - ESN-CNN архитектура
 
 ## Метрики оценки качества
 
@@ -127,39 +134,3 @@ tensorboard --logdir experiments/exp_001/logs
 - Precision
 - Recall
 - F1-Score
-- Sensitivity (Recall для класса приступов)
-- Specificity
-- AUC-ROC
-
-## Ожидаемые результаты
-
-Целевые метрики качества:
-- Accuracy: > 90%
-- F1-Score для класса приступов: > 0.8
-- Sensitivity: > 0.85
-- Specificity: > 0.95
-- AUC-ROC: > 0.95
-
-## Кросс-валидация
-
-Система реализует кросс-валидацию по животным, чтобы обеспечить корректную оценку обобщающей способности модели.
-
-Для запуска кросс-валидации используйте скрипт:
-
-```bash
-python run_cv.py --config experiments/config.yaml --n_splits 5
-```
-
-## Возможные улучшения
-
-### Краткосрочные:
-1. Добавление поддержки других форматов (BIDS, EEGLAB)
-2. Расширение набора аугментаций для ЭЭГ данных
-3. Реализация ансамблей моделей
-4. Добавление механизма внимания
-
-### Долгосрочные:
-1. Self-supervised pretraining на больших объемах нормальных данных
-2. Комбинирование CNN с рекуррентными слоями (LSTM/GRU)
-3. Использование трансформеров для анализа временных последовательностей
-4. Разработка системы онлайн-мониторинга приступов
