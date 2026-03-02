@@ -90,8 +90,7 @@ def main():
         dropout_rate=config['model']['dropout_rate'],
         learning_rate=config['training']['learning_rate'],
         weight_decay=config['training']['weight_decay'],
-        use_improved_architecture=config['model']['use_improved_architecture'],
-        use_minimal_architecture=config['model']['use_minimal_architecture'],
+        model_name=config['model']['model_name'],
         class_weights=config['model']['class_weights']
     )
     

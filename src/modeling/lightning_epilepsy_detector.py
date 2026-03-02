@@ -11,22 +11,21 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .simple_cnn_detector import SimpleEEGDetector, ImprovedEEGDetector, MinimalEEGDetector, MinimalEEGDetector_v2, MinimalEEGDetector_ESN
+from .simple_cnn_detector import MinimalEEGDetector_v2, MinimalEEGDetector_ESN
        
 class EpilepsyDetector_v2(pl.LightningModule):
     """
     PyTorch Lightning модуль для детектирования эпилепсии
     """
     
-    def __init__(self, 
+    def __init__(self,
                  input_channels: int = 4,
                  window_length: int = 2000,
                  num_classes: int = 2,
                  dropout_rate: float = 0.5,
                  learning_rate: float = 0.001,
                  weight_decay: float = 1e-4,
-                 use_improved_architecture: bool = False,
-                 use_minimal_architecture: bool = False,
+                 model_name: str = "minimal_v2",
                  class_weights: Optional[list] = None):
         """
         Инициализация модели
@@ -38,15 +37,19 @@ class EpilepsyDetector_v2(pl.LightningModule):
         dropout_rate (float): вероятность dropout
         learning_rate (float): скорость обучения
         weight_decay (float): коэффициент регуляризации L2
-        use_improved_architecture (bool): использовать улучшенную архитектуру
-        use_minimal_architecture (bool): использовать минимальную архитектуру
+        model_name (str): имя модели для использования ("minimal_v2", "esn")
         class_weights (list): веса классов для балансировки
         """
         super().__init__()
         self.save_hyperparameters()
         
         # Инициализация модели
-        self.model = MinimalEEGDetector_v2()
+        if model_name == "minimal_v2":
+            self.model = MinimalEEGDetector_v2()
+        elif model_name == "esn":
+            self.model = MinimalEEGDetector_ESN()
+        else:
+            raise ValueError(f"Unknown model name: {model_name}. Available models: minimal_v2, esn")
         
         # Параметры обучения
         self.learning_rate = learning_rate
