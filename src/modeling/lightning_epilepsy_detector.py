@@ -9,6 +9,7 @@ from typing import Optional
 import torchmetrics
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 
 from .simple_cnn_detector import SimpleEEGDetector, ImprovedEEGDetector, MinimalEEGDetector, MinimalEEGDetector_v2, MinimalEEGDetector_ESN
        
@@ -117,7 +118,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': scheduler,
-                'monitor': 'val_loss',
+                'monitor': 'val/loss',
                 'interval': 'epoch',
                 'frequency': 1
             }
@@ -148,11 +149,11 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_recall.update(probs_flat, y_flat)
         self.train_confmat.update(probs_flat, y_flat)
 
-        self.log("train_loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
-        self.log("train_acc", self.train_acc, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("train_f1", self.train_f1, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("train_precision", self.train_precision, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("train_recall", self.train_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
+        self.log("train/acc", self.train_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("train/f1", self.train_f1, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("train/precision", self.train_precision, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("train/recall", self.train_recall, prog_bar=False, on_step=False, on_epoch=True)
 
         return loss
     
@@ -169,11 +170,11 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.val_recall.update(probs_flat, y_flat)
         self.val_confmat.update(probs_flat, y_flat)
 
-        self.log("val_loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
-        self.log("val_acc", self.val_acc, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("val_f1", self.val_f1, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val_precision", self.val_precision, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("val_recall", self.val_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
+        self.log("val/acc", self.val_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/f1", self.val_f1, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("val/precision", self.val_precision, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/recall", self.val_recall, prog_bar=False, on_step=False, on_epoch=True)
 
         return loss
     
@@ -190,20 +191,22 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.test_recall.update(probs_flat, y_flat)
         self.test_confmat.update(probs_flat, y_flat)
 
-        self.log("test_loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
-        self.log("test_acc", self.test_acc, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("test_f1", self.test_f1, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("test_precision", self.test_precision, prog_bar=False, on_step=False, on_epoch=True)
-        self.log("test_recall", self.test_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
+        self.log("test/acc", self.test_acc, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("test/f1", self.test_f1, prog_bar=True, on_step=False, on_epoch=True)
+        self.log("test/precision", self.test_precision, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("test/recall", self.test_recall, prog_bar=False, on_step=False, on_epoch=True)
 
         return loss
         
     def on_train_epoch_end(self):
 
         confmat = self.train_confmat.compute()
+        cm = confmat.detach().cpu().numpy()
+        cm_int = np.rint(cm / 400.0).astype(np.int64)  # или .astype(int)
 
         fig, ax = plt.subplots()
-        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+        sns.heatmap(cm_int, annot=True, fmt="d",
                     xticklabels=["pred 0", "pred 1"],
                     yticklabels=["true 0", "true 1"],
                     ax=ax)
@@ -226,9 +229,11 @@ class EpilepsyDetector_v2(pl.LightningModule):
             return
         
         confmat = self.val_confmat.compute()
+        cm = confmat.detach().cpu().numpy()
+        cm_int = np.rint(cm / 400.0).astype(np.int64)  # или .astype(int)
 
         fig, ax = plt.subplots()
-        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+        sns.heatmap(cm_int, annot=True, fmt="d",
                     xticklabels=["pred 0", "pred 1"],
                     yticklabels=["true 0", "true 1"],
                     ax=ax)
@@ -247,10 +252,12 @@ class EpilepsyDetector_v2(pl.LightningModule):
 
     def on_test_epoch_end(self):
         confmat = self.test_confmat.compute()
+        cm = confmat.detach().cpu().numpy()
+        cm_int = np.rint(cm / 400.0).astype(np.int64)  # или .astype(int)
         
 
         fig, ax = plt.subplots()
-        sns.heatmap(confmat.cpu().numpy(), annot=True, fmt="d",
+        sns.heatmap(cm_int, annot=True, fmt="d",
                     xticklabels=["pred 0", "pred 1"],
                     yticklabels=["true 0", "true 1"],
                     ax=ax)

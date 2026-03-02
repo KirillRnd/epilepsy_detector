@@ -106,13 +106,13 @@ def main():
         dirpath=config['experiment']['checkpoint_dir'],
         filename='epilepsy-detector-{epoch:02d}-{val_loss:.2f}',
         save_top_k=3,
-        monitor='val_loss',
+        monitor='val/loss',
         mode='min',
         save_last=True
     )
     
     early_stop_callback = EarlyStopping(
-        monitor='val_loss',
+        monitor='val/loss',
         patience=config['training']['patience'],
         verbose=True,
         mode='min'
