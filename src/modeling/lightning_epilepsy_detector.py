@@ -198,6 +198,9 @@ class EpilepsyDetector_v2(pl.LightningModule):
 
     def on_validation_epoch_end(self):
 
+        if self.trainer.sanity_checking:
+            return
+        
         self.val_acc.reset()
         self.val_f1.reset()
         self.val_precision.reset()

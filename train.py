@@ -133,8 +133,11 @@ def main():
     print("Начало обучения...")
     trainer.fit(model, datamodule=data_module)
     
-    # Тестирование модели
-    print("Начало тестирования...")
+    print("Начало валидации...")
+    trainer.validate(model, datamodule=data_module)
+    
+    # Тестирование модели на тестовых данных
+    print("Начало тестирования на тестовых данных...")
     # Настройка тестовых данных
     data_module.setup(stage='test')
     trainer.test(model, datamodule=data_module)
