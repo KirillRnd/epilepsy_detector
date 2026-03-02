@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .model_registry import register_model
+
+@register_model("minimal_v2")
 class MinimalEEGDetector_v2(nn.Module):
     """
     Минимальная fully-conv 1D-CNN для детекции seizure по каждому семплу окна.
@@ -138,6 +141,7 @@ class ESNLayer(nn.Module):
         states = torch.cat(states, dim=2)
         return states
 
+@register_model("ESN")
 class MinimalEEGDetector_ESN(nn.Module):
     def __init__(self,
                  input_channels: int = 3,

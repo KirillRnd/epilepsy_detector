@@ -3,7 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import numpy as np
 from typing import Optional
 import torchmetrics
@@ -11,7 +10,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .simple_cnn_detector import MinimalEEGDetector_v2, MinimalEEGDetector_ESN
+from .model_registry import get_model_class
        
 class EpilepsyDetector_v2(pl.LightningModule):
     """
@@ -37,19 +36,15 @@ class EpilepsyDetector_v2(pl.LightningModule):
         dropout_rate (float): вероятность dropout
         learning_rate (float): скорость обучения
         weight_decay (float): коэффициент регуляризации L2
-        model_name (str): имя модели для использования ("minimal_v2", "esn")
+        model_name (str): имя модели для использования (см. model_registry.py)
         class_weights (list): веса классов для балансировки
         """
         super().__init__()
         self.save_hyperparameters()
         
         # Инициализация модели
-        if model_name == "minimal_v2":
-            self.model = MinimalEEGDetector_v2()
-        elif model_name == "esn":
-            self.model = MinimalEEGDetector_ESN()
-        else:
-            raise ValueError(f"Unknown model name: {model_name}. Available models: minimal_v2, esn")
+        model_class = get_model_class(model_name)
+        self.model = model_class()
         
         # Параметры обучения
         self.learning_rate = learning_rate
