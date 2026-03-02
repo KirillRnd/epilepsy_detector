@@ -18,7 +18,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.data_loading.epilepsy_datamodule import EpilepsyDataModule
-from src.modeling.lightning_epilepsy_detector import EpilepsyDetector, EpilepsyDetector_v2
+from src.modeling.lightning_epilepsy_detector import EpilepsyDetector_v2
 from src.preprocessing.lightning_class_balancer import compute_class_weights
 
 
@@ -134,11 +134,10 @@ def main():
     trainer.fit(model, datamodule=data_module)
     
     # Тестирование модели
-    if args.test:
-        print("Начало тестирования...")
-        # Настройка тестовых данных
-        data_module.setup(stage='test')
-        trainer.test(model, datamodule=data_module)
+    print("Начало тестирования...")
+    # Настройка тестовых данных
+    data_module.setup(stage='test')
+    trainer.test(model, datamodule=data_module)
     
     print("Обучение завершено!")
 
