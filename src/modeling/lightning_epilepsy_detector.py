@@ -81,6 +81,11 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
         self.val_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
         self.test_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
+        
+        # NEW: ROC-AUC — threshold-independent metric
+        self.train_auroc = torchmetrics.classification.BinaryAUROC()
+        self.val_auroc = torchmetrics.classification.BinaryAUROC()
+        self.test_auroc = torchmetrics.classification.BinaryAUROC()
     
     def forward(self, x):
         return self.model(x)
@@ -134,12 +139,14 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_precision.update(probs_flat, y_flat)
         self.train_recall.update(probs_flat, y_flat)
         self.train_confmat.update(probs_flat, y_flat)
+        self.train_auroc.update(probs_flat, y_flat)  # NEW
 
         self.log("train/loss", loss, prog_bar=True, on_step=True, on_epoch=True, batch_size=x.size(0))
         self.log("train/acc", self.train_acc, prog_bar=False, on_step=False, on_epoch=True)
         self.log("train/f1", self.train_f1, prog_bar=True, on_step=False, on_epoch=True)
         self.log("train/precision", self.train_precision, prog_bar=False, on_step=False, on_epoch=True)
         self.log("train/recall", self.train_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("train/auroc", self.train_auroc, prog_bar=False, on_step=False, on_epoch=True)  # NEW
 
         return loss
     
@@ -155,12 +162,14 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.val_precision.update(probs_flat, y_flat)
         self.val_recall.update(probs_flat, y_flat)
         self.val_confmat.update(probs_flat, y_flat)
+        self.val_auroc.update(probs_flat, y_flat)  # NEW
 
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
         self.log("val/acc", self.val_acc, prog_bar=False, on_step=False, on_epoch=True)
         self.log("val/f1", self.val_f1, prog_bar=True, on_step=False, on_epoch=True)
         self.log("val/precision", self.val_precision, prog_bar=False, on_step=False, on_epoch=True)
         self.log("val/recall", self.val_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("val/auroc", self.val_auroc, prog_bar=True, on_step=False, on_epoch=True)  # NEW
 
         return loss
     
@@ -176,12 +185,14 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.test_precision.update(probs_flat, y_flat)
         self.test_recall.update(probs_flat, y_flat)
         self.test_confmat.update(probs_flat, y_flat)
+        self.test_auroc.update(probs_flat, y_flat)  # NEW
 
         self.log("test/loss", loss, prog_bar=True, on_step=False, on_epoch=True, batch_size=x.size(0))
         self.log("test/acc", self.test_acc, prog_bar=False, on_step=False, on_epoch=True)
         self.log("test/f1", self.test_f1, prog_bar=True, on_step=False, on_epoch=True)
         self.log("test/precision", self.test_precision, prog_bar=False, on_step=False, on_epoch=True)
         self.log("test/recall", self.test_recall, prog_bar=False, on_step=False, on_epoch=True)
+        self.log("test/auroc", self.test_auroc, prog_bar=True, on_step=False, on_epoch=True)  # NEW
 
         return loss
         
@@ -208,6 +219,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.train_precision.reset()
         self.train_recall.reset()
         self.train_confmat.reset()
+        self.train_auroc.reset()  # NEW
 
     def on_validation_epoch_end(self):
 
@@ -235,6 +247,7 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.val_precision.reset()
         self.val_recall.reset()
         self.val_confmat.reset()
+        self.val_auroc.reset()  # NEW
 
     def on_test_epoch_end(self):
         confmat = self.test_confmat.compute()
@@ -260,3 +273,4 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.test_precision.reset()
         self.test_recall.reset()
         self.test_confmat.reset()
+        self.test_auroc.reset()  # NEW
