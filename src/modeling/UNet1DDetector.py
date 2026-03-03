@@ -22,7 +22,7 @@ class UpBlock(nn.Module):
         super().__init__()
         self.up = nn.ConvTranspose1d(in_ch, out_ch, kernel_size=2, stride=2)
         self.conv = nn.Sequential(
-            nn.Conv1d(out_ch * 2, out_ch, kernel_size=7, padding=3, bias=False),
+            nn.Conv1d(out_ch + in_ch, out_ch, kernel_size=7, padding=3, bias=False),
             nn.BatchNorm1d(out_ch),
             nn.ReLU(inplace=True),
             nn.Dropout(dropout),
