@@ -29,7 +29,54 @@ class EDFConverter:
         self.edf_loader = EDFLoader(preload_data=True)
         self.annotation_reader = SeizureAnnotationReader()
     
-    def convert_single_file(self, edf_file_path: str, txt_file_path: str, 
+    def _reorder_channels(self, raw_data: np.ndarray, channel_names: List[str]) -> tuple:
+        """
+        Переупорядочивание каналов в заданном порядке: FrL, FrR, OcR/Hipp.
+        Возвращает переупорядоченные данные и список имен каналов.
+        Если какие-то каналы отсутствуют, выдает предупреждение и пропускает их.
+        """
+        target_order = ['FrL', 'FrR']
+        # Определяем третий канал
+        third_candidates = ['OcR', 'Hipp']
+        third_channel = None
+        for cand in third_candidates:
+            if cand in channel_names:
+                third_channel = cand
+                break
+        if third_channel is None:
+            # Если ни одного из кандидатов нет, оставляем третий канал как есть (если есть хотя бы три канала)
+            # но это нарушит одинаковость порядка, поэтому выдаем предупреждение
+            print(f"Предупреждение: ни один из каналов {third_candidates} не найден. "
+                  f"Третий канал будет оставлен как есть.")
+            # Берем третий канал из исходных, если есть
+            if len(channel_names) >= 3:
+                third_channel = channel_names[2]
+            else:
+                # Если каналов меньше трех, оставляем только два
+                pass
+        if third_channel:
+            target_order.append(third_channel)
+        
+        # Собираем индексы целевых каналов
+        new_indices = []
+        new_names = []
+        for target in target_order:
+            if target in channel_names:
+                idx = channel_names.index(target)
+                new_indices.append(idx)
+                new_names.append(target)
+            else:
+                print(f"Предупреждение: канал {target} отсутствует в данных.")
+        
+        # Если есть другие каналы, кроме целевых, они отбрасываются
+        if len(new_indices) == 0:
+            raise ValueError("Не найдено ни одного целевого канала. Невозможно переупорядочить.")
+        
+        # Переупорядочиваем данные
+        reordered_data = raw_data[new_indices, :]
+        return reordered_data, new_names
+    
+    def convert_single_file(self, edf_file_path: str, txt_file_path: str,
                            output_dir: str, animal_id: str, session_id: str) -> Dict:
         """
         Конвертация одного .edf файла с разметкой в предобработанный формат
@@ -70,6 +117,18 @@ class EDFConverter:
             
             # Извлечение предобработанных данных
             processed_data = processed_raw.get_data()
+            
+            # Переупорядочивание каналов в заданном порядке
+            processed_data, new_channel_names = self._reorder_channels(
+                processed_data, processed_raw.ch_names
+            )
+            
+            # Обновление processed_raw для согласованности (выбор и переупорядочивание каналов)
+            # Создаем копию raw с выбранными каналами
+            if set(new_channel_names) != set(processed_raw.ch_names):
+                # Выбираем только нужные каналы и переупорядочиваем
+                processed_raw.pick_channels(new_channel_names)
+                processed_raw.reorder_channels(new_channel_names)
             
             # Сохранение предобработанных данных в .npy файл
             npy_file_path = output_path / "processed_signals.npy"
@@ -112,6 +171,10 @@ class EDFConverter:
             segments_data.to_csv(csv_file_path, index=False)
             
             # Сохранение метаданных
+            # Определяем третий канал
+            third_channel = None
+            if len(new_channel_names) >= 3:
+                third_channel = new_channel_names[2]
             metadata = {
                 'animal_id': animal_id,
                 'session_id': session_id,
@@ -119,7 +182,9 @@ class EDFConverter:
                 'txt_file': txt_file_path,
                 'sampling_freq': sfreq,
                 'n_channels': processed_data.shape[0],
-                'channel_names': processed_raw.ch_names,
+                'channel_names': new_channel_names,
+                'channel_order': 'fixed: FrL, FrR, third (OcR or Hipp)',
+                'third_channel': third_channel,
                 'duration': recording_duration,
                 'n_seizures': len(seizures),
                 'seizure_duration': sum(seizure['duration'] for seizure in seizures),
