@@ -12,6 +12,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 import numpy as np
+import shutil
 
 # Добавляем путь к модулям проекта
 import sys
@@ -103,7 +104,7 @@ def main():
     # Создание callbacks
     checkpoint_callback = ModelCheckpoint(
         dirpath=config['experiment']['checkpoint_dir'],
-        filename='epilepsy-detector-{epoch:02d}-{val_loss:.2f}',
+        filename='epilepsy-detector-{epoch:02d}-{val/loss:.5f}',
         save_top_k=3,
         monitor='val/loss',
         mode='min',
@@ -131,15 +132,38 @@ def main():
     # Обучение модели
     print("Начало обучения...")
     trainer.fit(model, datamodule=data_module)
-    
-    print("Начало валидации...")
-    trainer.validate(model, datamodule=data_module)
-    
-    # Тестирование модели на тестовых данных
-    print("Начало тестирования на тестовых данных...")
-    # Настройка тестовых данных
-    data_module.setup(stage='test')
-    trainer.test(model, datamodule=data_module)
+
+    # Сохранение лучшего чекпоинта в читаемом виде с указанием модели
+    if checkpoint_callback.best_model_path:
+        best_path = checkpoint_callback.best_model_path
+        best_loss = float(checkpoint_callback.best_model_score)
+        model_name = config['model']['model_name']
+        # Создать читаемое имя
+        readable_name = f"{model_name}-best-val_loss={best_loss:.5f}.ckpt"
+        readable_path = os.path.join(config['experiment']['checkpoint_dir'], readable_name)
+        # Копировать файл
+        shutil.copy2(best_path, readable_path)
+        print(f"Создан читаемый чекпоинт: {readable_path}")
+    else:
+        print("Предупреждение: лучший чекпоинт не найден.")
+
+    # Валидация и тестирование на лучшем чекпоинте
+    if checkpoint_callback.best_model_path:
+        best_path = checkpoint_callback.best_model_path
+        print(f"Начало валидации на лучшем чекпоинте: {best_path}")
+        trainer.validate(model, datamodule=data_module, ckpt_path=best_path)
+        
+        print("Начало тестирования на лучшем чекпоинте...")
+        data_module.setup(stage='test')
+        trainer.test(model, datamodule=data_module, ckpt_path=best_path)
+    else:
+        print("Предупреждение: лучший чекпоинт не найден, используется последняя модель.")
+        print("Начало валидации...")
+        trainer.validate(model, datamodule=data_module)
+        
+        print("Начало тестирования на тестовых данных...")
+        data_module.setup(stage='test')
+        trainer.test(model, datamodule=data_module)
     
     print("Обучение завершено!")
 
