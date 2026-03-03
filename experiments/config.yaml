@@ -9,7 +9,7 @@ data:
   train_animal_ratio: 0.7
   val_animal_ratio: 0.15
   # Жёсткое разбиение (если задано, то используется вместо случайного)
-  train_animals: ["Ati5x1", "Dex1x2NE", "Ati5y2"]  # Список ID животных для обучения
+  train_animals: ["Ati4x3", "Ati5x1", "Dex1x2NE", "Ati5y2", "Dex4x3", "Dex4x4NE"]  # Список ID животных для обучения
   val_animals: ["Ati5y1"]    # Список ID животных для валидации
   test_animals: ["Dex4x5"]   # Список ID животных для тестирования
 
@@ -19,8 +19,8 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  model_name: "UNet1DDetector"  # Доступные модели: "minimal_v2", "ESN"
-  class_weights: [1.0, 3.0]  # Веса для нормы и приступов
+  model_name: "ConvBiGRUDetector" 
+  class_weights: [1.0, 100.0]  # Веса для нормы и приступов
 
 # Параметры обучения
 training:
@@ -33,6 +33,6 @@ training:
 experiment:
   seed: 42
   device: "cuda"  # или "cuda"
-  output_dir: "experiments/exp_001"
-  checkpoint_dir: "experiments/exp_001/checkpoints"
-  log_dir: "experiments/exp_001/logs"
+  output_dir: "experiments/exp_002"
+  checkpoint_dir: "experiments/exp_002/checkpoints"
+  log_dir: "experiments/exp_002/logs"

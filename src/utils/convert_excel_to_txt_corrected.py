@@ -48,7 +48,7 @@ def convert_excel_to_txt_corrected(excel_file, output_dir):
             # Проверяем, что это действительно название условия (не NaN и строка)
             if pd.notna(condition_name) and isinstance(condition_name, str) and condition_name.strip():
                 # Проверяем, что следующие 4 столбца существуют
-                if i + 4 < len(df.columns):
+                if i + 4 <= len(df.columns):
                     # Используем правильные индексы для столбцов начала и конца
                     start_col = i + 1
                     end_col = i + 2

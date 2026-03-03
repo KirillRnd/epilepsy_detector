@@ -144,7 +144,7 @@ class EDFConverter:
             recording_duration = processed_data.shape[1] / sfreq
             
             # Создание бинарной маски (1 - приступ, 0 - норма)
-            seizure_mask = np.zeros(processed_data.shape[1], dtype=np.int8)
+            seizure_mask = np.zeros(processed_data.shape[1], dtype=np.int32)
             
             # Заполнение маски приступами
             for seizure in seizures:
@@ -188,7 +188,7 @@ class EDFConverter:
                 'duration': recording_duration,
                 'n_seizures': len(seizures),
                 'seizure_duration': sum(seizure['duration'] for seizure in seizures),
-                'seizure_samples': int(sum(seizure_mask))  # Количество сэмплов с приступами
+                'seizure_samples': int(np.sum(seizure_mask, dtype=np.int64))  # Количество сэмплов с приступами
             }
             
             metadata_file_path = output_path / "conversion_metadata.json"

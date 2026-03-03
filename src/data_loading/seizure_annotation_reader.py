@@ -505,7 +505,7 @@ class IntegratedAnnotationReader(AdvancedSeizureAnnotationReader):
         """
         # Создание массива для маски
         num_samples = int(recording_duration * sampling_rate)
-        mask = np.zeros(num_samples, dtype=np.int8)
+        mask = np.zeros(num_samples, dtype=np.int32)
         
         # Получение разметки приступов
         seizures = self.get_seizures_for_recording(file_id, recording_duration)
