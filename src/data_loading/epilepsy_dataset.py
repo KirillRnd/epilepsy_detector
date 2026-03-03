@@ -3,129 +3,16 @@ from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import List, Tuple
-import os
+from typing import List, Tuple, Dict
+from src.data_loading.augmentations import EEGAugmentor    
 
-class EpilepsyDataset(Dataset):
-    """
-    Датасет для загрузки предобработанных данных ЭЭГ
-    """
-    
-    def __init__(self, data_dir: str, segments_df: pd.DataFrame, 
-                 window_length: int = 2000, overlap: float = 0.5):
-        """
-        Инициализация датасета
-        
-        Параметры:
-        data_dir (str): директория с предобработанными данными
-        segments_df (pd.DataFrame): DataFrame с информацией о сегментах
-        window_length (int): длина окна в отсчетах (по умолчанию 2000 отсчетов = 5 сек при 400 Гц)
-        overlap (float): перекрытие окон (0.0 - 1.0)
-        """
-        self.data_dir = Path(data_dir)
-        self.segments_df = segments_df
-        self.window_length = window_length
-        self.overlap = overlap
-        self.step_size = int(window_length * (1 - overlap))
-        
-        # Создание списка окон
-        self.windows = self._create_windows()
-        self.log_flag = True
-        
-                # Создаем кэш для хранения данных в памяти
-        self.data_cache = {}
-        
-        # Предзагрузка всех уникальных файлов
-        print("Предзагрузка данных в оперативную память...")
-        for animal_id, session_id, _, _, _ in self.windows:
-            cache_key = (animal_id, session_id)
-            if cache_key not in self.data_cache:
-                data_file = self.data_dir / animal_id / session_id / "processed_signals.npy"
-                # Загружаем и сохраняем в кэш
-                self.data_cache[cache_key] = np.load(data_file)
-        print("Предзагрузка завершена!")
-    
-    def _create_windows(self) -> List[Tuple[str, str, int, int, int]]:
-        """
-        Создание списка окон для загрузки
-        
-        Возвращает:
-        list: список кортежей (animal_id, session_id, start_sample, end_sample, label)
-        """
-        windows = []
-        
-        for _, row in self.segments_df.iterrows():
-            animal_id = row['animal_id']
-            session_id = row['session_id']
-            segment_type = row['segment_type']
-            start_sample = int(row['start_sample'])
-            end_sample = int(row['end_sample'])
-            
-            # Определение метки класса
-            label = 1 if segment_type == 'seizure' else 0
-            
-            # Создание окон в сегменте
-            current_start = start_sample
-            while current_start + self.window_length <= end_sample:
-                current_end = current_start + self.window_length
-                windows.append((animal_id, session_id, current_start, current_end, label))
-                current_start += self.step_size
-        
-        return windows
-    
-    def __len__(self) -> int:
-        return len(self.windows)
-    
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
-        """
-        Получение элемента датасета
-        
-        Параметры:
-        idx (int): индекс элемента
-        
-        Возвращает:
-        tuple: (сигнал, метка)
-        """
-        animal_id, session_id, start_sample, end_sample, label = self.windows[idx]
-        
-        # Путь к файлу с данными
-        data_file = self.data_dir / animal_id / session_id / "processed_signals.npy"
-        
-        # Получаем данные из кэша в оперативной памяти
-        data = self.data_cache[(animal_id, session_id)]
-        
-        # Извлечение окна
-        window_data = data[:, start_sample:end_sample]
-        
-        # Преобразование в тензор
-        window_tensor = torch.FloatTensor(window_data)
-        
-        # Вычисляем текущую длину и необходимый паддинг
-        current_length = window_tensor.shape[1]
-        
-        if current_length < self.window_length:
-            pad_size = self.window_length - current_length
-            # F.pad принимает аргумент в виде (pad_left, pad_right) для последней размерности
-            # Добавляем нули только в конец (справа)
-            window_tensor = torch.nn.functional.pad(window_tensor, (0, pad_size), mode='constant', value=0.0)
-            
-        elif current_length > self.window_length:
-            # На всякий случай, если окно вдруг оказалось больше (обрезаем лишнее)
-            window_tensor = window_tensor[:, :self.window_length]
-            
-        if self.log_flag:
-            print(f"Loaded window with shape {window_tensor.shape}")
-            self.log_flag = False
-        
-        return window_tensor, label
-    
 class EpilepsyDataset_v2(Dataset):
     """
     Датасет для загрузки предобработанных данных ЭЭГ
     """
 
     def __init__(self, data_dir: str, segments_df: pd.DataFrame,
-                 window_length: int = 2000, overlap: float = 0.5):
+                 window_length: int = 2000, overlap: float = 0.5, augmentor: EEGAugmentor = None):
         self.data_dir = Path(data_dir)
         self.segments_df = segments_df
         self.window_length = window_length
@@ -151,6 +38,8 @@ class EpilepsyDataset_v2(Dataset):
                 data_file = self.data_dir / animal_id / session_id / "processed_signals.npy"
                 self.data_cache[cache_key] = np.load(data_file)
         print("Предзагрузка завершена!")
+        
+        self.augmentor = augmentor
 
     def _create_windows(self) -> List[Tuple[str, str, int, int]]:
         """
@@ -230,4 +119,9 @@ class EpilepsyDataset_v2(Dataset):
 
         window_tensor = torch.from_numpy(window_data).float()
         target_tensor = torch.from_numpy(target).float()
+        
+        # Применяем аугментации (только для train!)
+        if self.augmentor is not None:
+            window_tensor, target_tensor = self.augmentor(window_tensor, target_tensor)
+        
         return window_tensor, target_tensor

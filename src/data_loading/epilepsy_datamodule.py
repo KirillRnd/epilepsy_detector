@@ -6,8 +6,8 @@ from pathlib import Path
 from typing import Optional, List
 from sklearn.model_selection import train_test_split
 import numpy as np
-
-from .epilepsy_dataset import EpilepsyDataset, EpilepsyDataset_v2
+from src.data_loading.augmentations import EEGAugmentor, MixupCutMixCollator
+from .epilepsy_dataset import EpilepsyDataset_v2
 
 class EpilepsyDataModule(pl.LightningDataModule):
     """
@@ -160,20 +160,30 @@ class EpilepsyDataModule(pl.LightningDataModule):
         val_segments = all_segments_df[all_segments_df['animal_id'].isin(val_animals)]
         test_segments = all_segments_df[all_segments_df['animal_id'].isin(test_animals)]
         
+        augmentor = EEGAugmentor(
+            p_noise=0.5, noise_std_range=(0.01, 0.1),
+            p_scale=0.5, scale_range=(0.7, 1.3),
+            p_time_shift=0.3, max_shift_samples=80,
+            p_channel_dropout=0.2,
+            label_smooth_samples=40,
+        )
+        
         # Создание датасетов
         if stage == "fit" or stage is None:
             self.train_dataset = EpilepsyDataset_v2(
                 data_dir=str(self.data_dir),
                 segments_df=train_segments,
                 window_length=self.window_length,
-                overlap=self.overlap
+                overlap=self.overlap,
+                augmentor=augmentor
             )
             
             self.val_dataset = EpilepsyDataset_v2(
                 data_dir=str(self.data_dir),
                 segments_df=val_segments,
                 window_length=self.window_length,
-                overlap=self.overlap
+                overlap=self.overlap,
+                augmentor=None,  # <-- без аугментации
             )
         
         if stage == "test" or stage is None:
@@ -181,7 +191,8 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 data_dir=str(self.data_dir),
                 segments_df=test_segments,
                 window_length=self.window_length,
-                overlap=self.overlap
+                overlap=self.overlap,
+                augmentor=None,  # <-- без аугментации
             )
         
         # Вывод разбиения животных на сеты
@@ -196,12 +207,18 @@ class EpilepsyDataModule(pl.LightningDataModule):
         if self.train_dataset is None:
             raise RuntimeError("Датасет не инициализирован. Вызовите setup() перед train_dataloader().")
         
+        collator = MixupCutMixCollator(
+            p_mixup=0.3, mixup_alpha=0.3,
+            p_cutmix=0.2, cutmix_min_len=200, cutmix_max_len=800,
+        )
+        
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=4,
-            pin_memory=True
+            pin_memory=True,
+            collate_fn=collator,  # <-- Mixup/CutMix на уровне батча
         )
     
     def val_dataloader(self) -> DataLoader:

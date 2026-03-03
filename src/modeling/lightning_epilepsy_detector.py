@@ -9,7 +9,7 @@ import torchmetrics
 import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
-
+from src.modeling.losses import FocalLoss
 from .model_registry import get_model_class
        
 class EpilepsyDetector_v2(pl.LightningModule):
@@ -56,9 +56,10 @@ class EpilepsyDetector_v2(pl.LightningModule):
             self.class_weights = torch.FloatTensor(class_weights)
         else:
             self.class_weights = None
-        pos_weight = 100
-        self.register_buffer("pos_weight", torch.tensor([pos_weight], dtype=torch.float32))
-        
+        #pos_weight = 100
+        #self.register_buffer("pos_weight", torch.tensor([pos_weight], dtype=torch.float32))
+        self.loss_fn = FocalLoss(alpha=0.95, gamma=2.0)
+        #self.loss_fn = torch.nn.BCEWithLogitsLoss(pos_weight=torch.tensor([100.0]))
         # Хранилище для результатов валидации и тестирования
         # Метрики (агрегируют по всем точкам; будем flatten)
         self.train_acc = torchmetrics.classification.BinaryAccuracy(threshold=self.threshold)
@@ -99,40 +100,27 @@ class EpilepsyDetector_v2(pl.LightningModule):
         Возвращает:
         dict: конфигурация оптимизатора и планировщика
         """
-        optimizer = torch.optim.Adam(
+        optimizer = torch.optim.AdamW(
             self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=float(self.weight_decay)
+            lr=self.learning_rate,  # 3e-4
+            weight_decay=float(self.weight_decay),  # 1e-3
         )
-        
-        scheduler = ReduceLROnPlateau(
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             optimizer,
-            mode='min',
-            patience=5,
-            factor=0.5
+            T_max=self.trainer.max_epochs,
+            eta_min=1e-6,
         )
-        
         return {
             'optimizer': optimizer,
             'lr_scheduler': {
                 'scheduler': scheduler,
-                'monitor': 'val/loss',
                 'interval': 'epoch',
-                'frequency': 1
             }
-        }
+        } 
     
     def _compute_loss(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """
-        logits:  (B, T) float
-        targets: (B, T) float {0,1}
-        """
-        # Важно: targets должны быть float для BCE
         targets = targets.float()
-
-        loss_fn = nn.BCEWithLogitsLoss(pos_weight=self.pos_weight)
-
-        return loss_fn(logits, targets)
+        return self.loss_fn(logits, targets)
     
     def training_step(self, batch, batch_idx):
         x, y = batch  # x: (B,C,T), y: (B,T) 0/1

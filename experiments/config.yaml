@@ -19,15 +19,15 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  model_name: "minimal_v2"  # Доступные модели: "minimal_v2", "ESN"
+  model_name: "UNet1DDetector"  # Доступные модели: "minimal_v2", "ESN"
   class_weights: [1.0, 3.0]  # Веса для нормы и приступов
 
 # Параметры обучения
 training:
-  learning_rate: 0.001
-  num_epochs: 50
-  weight_decay: 1e-4
-  patience: 10
+  learning_rate: 0.0003
+  num_epochs: 120
+  weight_decay: 0.001
+  patience: 20
 
 # Параметры эксперимента
 experiment:
