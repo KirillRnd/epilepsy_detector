@@ -83,8 +83,8 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  model_name: "minimal_v2"  # Доступные модели: "minimal_v2", "ESN"
-  class_weights: [1.0, 3.0]  # Веса для нормы и приступов
+  model_name: "UNet1DDetector" 
+  class_weights: [1.0, 100.0]  # Веса для нормы и приступов
 
 # Параметры обучения
 training:
@@ -123,9 +123,17 @@ tensorboard --logdir experiments/exp_001/logs
 
 Проект поддерживает две архитектуры моделей:
 
-1. **MinimalEEGDetector_v2** - базовая 1D-CNN архитектура
-2. **MinimalEEGDetector_ESN** - ESN-CNN архитектура
+1. **ConvBiGRUDetector** - Conv1d feature extractor + BiGRU temporal smoother
+2. **TCNDetector** - Dilated TCN для покадровой детекции приступов
+3. **UNet1DDetector** - Encoder-Decoder с skip connections для 1D сегментации
 
+### Сводная таблица результатов
+
+| Модель | val_loss | val_acc | val_f1 | test_acc | test_f1 | test_precision | test_recall |
+|--------|----------|---------|--------|----------|---------|----------------|-------------|
+| ConvBiGRUDetector | 0.0076 | 0.9704 | 0.1685 | 0.9944 | 0.0053 | 0.0674 | 0.0028 |
+| TCNDetector | 0.0086 | 0.9763 | 0.1296 | 0.9944 | 0.0037 | 0.0658 | 0.0019 |
+| UNet1DDetector | 0.0086 | 0.9789 | 0.1359 | 0.9945 | 0.0062 | 0.1295 | 0.0032 |
 ## Метрики оценки качества
 
 Система вычисляет следующие метрики качества:
