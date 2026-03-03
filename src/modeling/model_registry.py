@@ -2,7 +2,7 @@
 Реестр моделей для системы детектирования эпилепсии
 """
 
-from typing import Dict, Type, Callable
+from typing import Dict, Type, Callable, Any
 import torch.nn as nn
 
 # Глобальный реестр моделей
@@ -39,6 +39,20 @@ def get_model_class(name: str) -> Type[nn.Module]:
         available = ", ".join(_MODEL_REGISTRY.keys())
         raise ValueError(f"Неизвестное имя модели: {name}. Доступные модели: {available}")
     return _MODEL_REGISTRY[name]
+
+def get_model(name: str, config: Dict[str, Any]) -> nn.Module:
+    """
+    Создать экземпляр модели по имени и конфигурации
+    
+    Args:
+        name: Имя модели
+        config: Конфигурация модели
+        
+    Returns:
+        Экземпляр модели
+    """
+    model_class = get_model_class(name)
+    return model_class(**config)
 
 def list_available_models() -> list:
     """
