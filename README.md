@@ -126,14 +126,19 @@ tensorboard --logdir experiments/exp_001/logs
 1. **ConvBiGRUDetector** - Conv1d feature extractor + BiGRU temporal smoother
 2. **TCNDetector** - Dilated TCN для покадровой детекции приступов
 3. **UNet1DDetector** - Encoder-Decoder с skip connections для 1D сегментации
+4. **RDSCBiGRUDetector** - depthwise separable convolutions + SE-attention + residuals
+5. **MSConvBiGRUDetector** - мультимасштабные свёртки (k=5,15,31) с channel attention для захвата разных частотных паттернов
+
 
 ### Сводная таблица результатов
 
-| Модель | val_loss | val_acc | val_f1 | test_acc | test_f1 | test_precision | test_recall |
-|--------|----------|---------|--------|----------|---------|----------------|-------------|
-| ConvBiGRUDetector | 0.0076 | 0.9704 | 0.1685 | 0.9944 | 0.0053 | 0.0674 | 0.0028 |
-| TCNDetector | 0.0086 | 0.9763 | 0.1296 | 0.9944 | 0.0037 | 0.0658 | 0.0019 |
-| UNet1DDetector | 0.0086 | 0.9789 | 0.1359 | 0.9945 | 0.0062 | 0.1295 | 0.0032 |
+| Модель | val_f1 | val_recall | val_precision | test_f1 | test_recall | test_precision |
+|--------|--------|------------|---------------|---------|-------------|----------------|
+| RDSCBiGRUDetector | 0.7360 | 0.9886 | 0.5970 | 0.5034 | 0.3573 | 0.8514 |
+| ConvBiGRUDetector | 0.7195 | 0.9830 | 0.5851 | 0.3210 | 0.1944 | 0.9208 |
+| MSConvBiGRUDetector | 0.7500 | 0.9812 | 0.6244 | 0.4712 | 0.3207 | 0.8884 |
+| TCNDetector | 0.6793 | 0.8925 | 0.5893 | 0.2675 | 0.1637 | 0.7304 |
+| UNet1DDetector | 0.7142 | 0.9202 | 0.6677 | 0.3508 | 0.2318 | 0.7210 |
 ## Метрики оценки качества
 
 Система вычисляет следующие метрики качества:
