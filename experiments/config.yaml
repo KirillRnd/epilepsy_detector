@@ -19,13 +19,13 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  model_name: "ConvBiGRUDetector" 
+  model_name: "RDSCBiGRUDetector" #ConvBiGRUDetector, MSConvBiGRUDetector, RDSCBiGRUDetector, TCNDetector, UNet1DDetector
   class_weights: [1.0, 100.0]  # Веса для нормы и приступов
 
 # Параметры обучения
 training:
   learning_rate: 0.0003
-  num_epochs: 120
+  num_epochs: 50
   weight_decay: 0.001
   patience: 20
 
