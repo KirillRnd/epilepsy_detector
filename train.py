@@ -76,7 +76,15 @@ def main():
         train_animals=config['data'].get('train_animals'),
         val_animals=config['data'].get('val_animals'),
         test_animals=config['data'].get('test_animals'),
-        seed=config['experiment']['seed']
+        seed=config['experiment']['seed'],
+        cache_mode=config['data'].get('cache_mode', 'mmap'),
+        max_open_files=config['data'].get('max_open_files', 16),
+        num_workers=config['data'].get('num_workers', 4),
+        pin_memory=config['data'].get('pin_memory', True),
+        persistent_workers=config['data'].get('persistent_workers', True),
+        prefetch_factor=config['data'].get('prefetch_factor', 2),
+        train_shuffle_mode=config['data'].get('train_shuffle_mode', 'block'),
+        block_shuffle_size=config['data'].get('block_shuffle_size', 4096),
     )
     
     # Подготовка данных

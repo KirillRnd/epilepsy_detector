@@ -1,0 +1,41 @@
+# Training config for the combined legacy processed dataset plus result_0 / EDF_july.
+
+data:
+  data_dir: "data/processed2"
+  window_length: 2000  # 5 seconds at 400 Hz
+  batch_size: 512
+  overlap: 0.5
+  cache_mode: "mmap"
+  max_open_files: 8
+  num_workers: 2
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+  train_shuffle_mode: "block"
+  block_shuffle_size: 4096
+  train_animal_ratio: 0.7
+  val_animal_ratio: 0.15
+  train_animals: ["Ati4x3", "Ati5x1", "Dex1x2NE", "Ati5y2", "Dex4x3", "Dex4x4NE", "FN0y1", "FN0y2"]
+  val_animals: ["Ati5y1", "FN0y3"]
+  test_animals: ["Dex4x5", "FN0y7"]
+
+model:
+  input_channels: 3
+  window_length: 2000
+  num_classes: 2
+  dropout_rate: 0.5
+  model_name: "RDSCBiGRUDetector"
+  class_weights: [1.0, 100.0]
+
+training:
+  learning_rate: 0.0003
+  num_epochs: 50
+  weight_decay: 0.001
+  patience: 20
+
+experiment:
+  seed: 42
+  device: "cuda"
+  output_dir: "experiments/exp_processed2"
+  checkpoint_dir: "experiments/exp_processed2/checkpoints"
+  log_dir: "experiments/exp_processed2/logs"

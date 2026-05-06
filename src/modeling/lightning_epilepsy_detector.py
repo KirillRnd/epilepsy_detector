@@ -82,10 +82,11 @@ class EpilepsyDetector_v2(pl.LightningModule):
         self.val_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
         self.test_confmat = torchmetrics.classification.BinaryConfusionMatrix(threshold=self.threshold)
         
-        # NEW: ROC-AUC — threshold-independent metric
-        self.train_auroc = torchmetrics.classification.BinaryAUROC()
-        self.val_auroc = torchmetrics.classification.BinaryAUROC()
-        self.test_auroc = torchmetrics.classification.BinaryAUROC()
+        # Binned AUROC keeps constant memory. Without thresholds torchmetrics
+        # stores every frame prediction until epoch end, which is huge here.
+        self.train_auroc = torchmetrics.classification.BinaryAUROC(thresholds=101)
+        self.val_auroc = torchmetrics.classification.BinaryAUROC(thresholds=101)
+        self.test_auroc = torchmetrics.classification.BinaryAUROC(thresholds=101)
     
     def forward(self, x):
         return self.model(x)

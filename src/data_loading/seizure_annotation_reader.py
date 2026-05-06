@@ -81,6 +81,37 @@ class SeizureAnnotationReader:
             raise Exception(f"Ошибка при чтении файла {file_path}: {str(e)}")
         
         return seizures
+
+    def _parse_time_value(self, value: str) -> Optional[float]:
+        """
+        Parse either seconds ("55.1", "55,1") or clock time ("00:00:55").
+        Returns seconds from recording start.
+        """
+        value = value.strip().replace(',', '.')
+        if not value:
+            return None
+
+        if ':' not in value:
+            try:
+                return float(value)
+            except ValueError:
+                return None
+
+        parts = value.split(':')
+        if len(parts) not in (2, 3):
+            return None
+
+        try:
+            nums = [float(part) for part in parts]
+        except ValueError:
+            return None
+
+        if len(nums) == 2:
+            minutes, seconds = nums
+            return minutes * 60 + seconds
+
+        hours, minutes, seconds = nums
+        return hours * 3600 + minutes * 60 + seconds
     
     def _parse_seizure_line(self, line: str, line_num: int) -> Optional[Dict]:
         """
@@ -100,6 +131,36 @@ class SeizureAnnotationReader:
         
         # Сначала пробуем обработать формат с табуляцией или пробелами как разделителями
         # и запятыми как десятичными разделителями
+        # 4. "00:00:55-00:00:57 SD 0.3 CERT 8" (MESD export)
+        if line.lower().startswith('start:'):
+            return None
+
+        time_token = r'\d+(?::\d{2}){1,2}(?:[.,]\d+)?|\d+(?:[.,]\d+)?'
+        mesd_match = re.match(
+            rf'^\s*(?P<start>{time_token})\s*[-–—]\s*(?P<end>{time_token})(?P<rest>.*)$',
+            line,
+        )
+        if mesd_match:
+            start_time = self._parse_time_value(mesd_match.group('start'))
+            end_time = self._parse_time_value(mesd_match.group('end'))
+            if start_time is not None and end_time is not None and start_time >= 0 and end_time > start_time:
+                rest = mesd_match.group('rest')
+                seizure_data = {
+                    'start': start_time,
+                    'end': end_time,
+                    'duration': end_time - start_time,
+                    'line_number': line_num,
+                    'label': 'seizure',
+                }
+
+                sd_match = re.search(r'\bSD\s+([0-9]+(?:[.,][0-9]+)?)', rest, flags=re.IGNORECASE)
+                cert_match = re.search(r'\bCERT\s+([0-9]+(?:[.,][0-9]+)?)', rest, flags=re.IGNORECASE)
+                if sd_match:
+                    seizure_data['sd'] = float(sd_match.group(1).replace(',', '.'))
+                if cert_match:
+                    seizure_data['cert'] = float(cert_match.group(1).replace(',', '.'))
+                return seizure_data
+
         parts = re.split(r'[\t\s]+', line)
         parts = [p for p in parts if p]  # Удаление пустых элементов
         

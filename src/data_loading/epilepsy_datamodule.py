@@ -1,13 +1,42 @@
 import pytorch_lightning as pl
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Sampler
 import pandas as pd
 from pathlib import Path
-from typing import Optional, List
+from typing import Iterator, Optional, List
 from sklearn.model_selection import train_test_split
 import numpy as np
+import random
 from src.data_loading.augmentations import EEGAugmentor, MixupCutMixCollator
-from .epilepsy_dataset import EpilepsyDataset_v2
+from .epilepsy_dataset import EpilepsyDataset_v2,EpilepsyDataset_v3 
+
+
+class WindowBlockShuffleSampler(Sampler[int]):
+    def __init__(self, data_source, block_size: int = 4096, seed: int = 42):
+        if block_size < 1:
+            raise ValueError("block_size must be >= 1")
+
+        self.data_source = data_source
+        self.block_size = int(block_size)
+        self.seed = int(seed)
+        self.epoch = 0
+
+    def __iter__(self) -> Iterator[int]:
+        n_items = len(self.data_source)
+        blocks = [
+            (start, min(start + self.block_size, n_items))
+            for start in range(0, n_items, self.block_size)
+        ]
+        rng = random.Random(self.seed + self.epoch)
+        rng.shuffle(blocks)
+        self.epoch += 1
+
+        for start, end in blocks:
+            yield from range(start, end)
+
+    def __len__(self) -> int:
+        return len(self.data_source)
+
 
 class EpilepsyDataModule(pl.LightningDataModule):
     """
@@ -24,7 +53,15 @@ class EpilepsyDataModule(pl.LightningDataModule):
                  train_animals: list = None,
                  val_animals: list = None,
                  test_animals: list = None,
-                 seed: int = 42):
+                 seed: int = 42,
+                 cache_mode: str = "mmap",
+                 max_open_files: int = 16,
+                 num_workers: int = 4,
+                 pin_memory: bool = True,
+                 persistent_workers: bool = True,
+                 prefetch_factor: int = 2,
+                 train_shuffle_mode: str = "block",
+                 block_shuffle_size: int = 4096):
         """
         Инициализация DataModule
         
@@ -45,6 +82,14 @@ class EpilepsyDataModule(pl.LightningDataModule):
         self.train_animal_ratio = train_animal_ratio
         self.val_animal_ratio = val_animal_ratio
         self.seed = seed
+        self.cache_mode = cache_mode
+        self.max_open_files = max_open_files
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
+        self.train_shuffle_mode = train_shuffle_mode
+        self.block_shuffle_size = block_shuffle_size
         
         # Сохраняем списки животных для жёсткого разбиения (если заданы)
         self.train_animals = train_animals
@@ -170,12 +215,15 @@ class EpilepsyDataModule(pl.LightningDataModule):
         
         # Создание датасетов
         if stage == "fit" or stage is None:
-            self.train_dataset = EpilepsyDataset_v2(
+            self.train_dataset = EpilepsyDataset_v3(
                 data_dir=str(self.data_dir),
                 segments_df=train_segments,
                 window_length=self.window_length,
-                overlap=self.overlap,
-                augmentor=augmentor
+                overlap=self.overlap,               
+                seizure_overlap=0.9,   # <-- добавить
+                augmentor=augmentor,
+                cache_mode=self.cache_mode,
+                max_open_files=self.max_open_files,
             )
             
             self.val_dataset = EpilepsyDataset_v2(
@@ -184,6 +232,8 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 window_length=self.window_length,
                 overlap=self.overlap,
                 augmentor=None,  # <-- без аугментации
+                cache_mode=self.cache_mode,
+                max_open_files=self.max_open_files,
             )
         
         if stage == "test" or stage is None:
@@ -193,12 +243,24 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 window_length=self.window_length,
                 overlap=self.overlap,
                 augmentor=None,  # <-- без аугментации
+                cache_mode=self.cache_mode,
+                max_open_files=self.max_open_files,
             )
         
         # Вывод разбиения животных на сеты
         print(f"Train animals: {train_animals}")
         print(f"Validation animals: {val_animals}")
         print(f"Test animals: {test_animals}")
+
+    def _dataloader_kwargs(self):
+        kwargs = {
+            "num_workers": self.num_workers,
+            "pin_memory": self.pin_memory,
+        }
+        if self.num_workers > 0:
+            kwargs["persistent_workers"] = self.persistent_workers
+            kwargs["prefetch_factor"] = self.prefetch_factor
+        return kwargs
     
     def train_dataloader(self) -> DataLoader:
         """
@@ -211,14 +273,32 @@ class EpilepsyDataModule(pl.LightningDataModule):
             p_mixup=0.3, mixup_alpha=0.3,
             p_cutmix=0.2, cutmix_min_len=200, cutmix_max_len=800,
         )
+
+        if self.train_shuffle_mode == "block":
+            sampler = WindowBlockShuffleSampler(
+                self.train_dataset,
+                block_size=self.block_shuffle_size,
+                seed=self.seed,
+            )
+            shuffle = False
+        elif self.train_shuffle_mode == "full":
+            sampler = None
+            shuffle = True
+        elif self.train_shuffle_mode == "none":
+            sampler = None
+            shuffle = False
+        else:
+            raise ValueError(
+                "train_shuffle_mode must be one of: 'block', 'full', 'none'"
+            )
         
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=4,
-            pin_memory=True,
+            shuffle=shuffle,
+            sampler=sampler,
             collate_fn=collator,  # <-- Mixup/CutMix на уровне батча
+            **self._dataloader_kwargs(),
         )
     
     def val_dataloader(self) -> DataLoader:
@@ -232,8 +312,7 @@ class EpilepsyDataModule(pl.LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=4,
-            pin_memory=True
+            **self._dataloader_kwargs(),
         )
     
     def test_dataloader(self) -> DataLoader:
@@ -247,6 +326,5 @@ class EpilepsyDataModule(pl.LightningDataModule):
             self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=4,
-            pin_memory=True
+            **self._dataloader_kwargs(),
         )
