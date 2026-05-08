@@ -37,7 +37,9 @@ from scipy import signal as scipy_signal
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import src.modeling  # noqa: F401 - registers model classes
 from src.modeling.model_registry import get_model_class
+from src.postprocessing import postprocess
 
 
 # ===========================================================================
@@ -202,65 +204,6 @@ def sliding_inference(
     # Усредняем в зонах перекрытия
     count[count == 0] = 1.0
     return (prob_sum / count).astype(np.float32)
-
-
-# ===========================================================================
-# 3. Постобработка — гистерезисный порог, слияние, фильтрация
-# ===========================================================================
-
-def postprocess(
-    probs: np.ndarray,
-    sr: float = 400.0,
-    onset: float = 0.3,
-    offset: float = 0.15,
-    min_duration_s: float = 3.0,
-    min_gap_s: float = 2.0,
-    collar_s: float = 0.0,
-) -> list[tuple[float, float]]:
-    """
-    Гистерезисная бинаризация + слияние + фильтрация коротких сегментов.
-
-    Возвращает список (start_sec, end_sec).
-    """
-    min_dur_samples = int(min_duration_s * sr)
-    min_gap_samples = int(min_gap_s * sr)
-    collar_samples  = int(collar_s * sr)
-
-    # --- Гистерезисный порог ---
-    segments = []
-    active = False
-    seg_start = 0
-    for i, p in enumerate(probs):
-        if not active and p >= onset:
-            active = True
-            seg_start = i
-        elif active and p < offset:
-            active = False
-            segments.append((seg_start, i))
-    if active:
-        segments.append((seg_start, len(probs)))
-
-    # --- Слияние близких сегментов ---
-    merged = []
-    for seg in segments:
-        if merged and (seg[0] - merged[-1][1]) < min_gap_samples:
-            merged[-1] = (merged[-1][0], seg[1])
-        else:
-            merged.append(list(seg))
-
-    # --- Удаление коротких ---
-    merged = [s for s in merged if (s[1] - s[0]) >= min_dur_samples]
-
-    # --- Collar (расширение границ) ---
-    if collar_samples > 0:
-        merged = [
-            (max(0, s[0] - collar_samples),
-             min(len(probs), s[1] + collar_samples))
-            for s in merged
-        ]
-
-    # --- Перевод в секунды ---
-    return [(s[0] / sr, s[1] / sr) for s in merged]
 
 
 # ===========================================================================
