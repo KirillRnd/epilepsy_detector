@@ -196,7 +196,7 @@ def binary_metrics_from_counts(tn: int, fp: int, fn: int, tp: int) -> dict[str, 
 
 def compute_frame_metrics(
     y_true: np.ndarray,
-    y_prob: np.ndarray,
+    y_prob: np.ndarray | None,
     y_pred: np.ndarray,
 ) -> dict[str, Any]:
     y_true_b = np.asarray(y_true).reshape(-1).astype(bool)
@@ -206,7 +206,10 @@ def compute_frame_metrics(
     fn = int(np.count_nonzero(y_true_b & ~y_pred_b))
     tp = int(np.count_nonzero(y_true_b & y_pred_b))
     metrics = binary_metrics_from_counts(tn, fp, fn, tp)
-    metrics.update(exact_curve_metrics(y_true_b, y_prob))
+    if y_prob is None:
+        metrics.update({"auroc": None, "auprc": None})
+    else:
+        metrics.update(exact_curve_metrics(y_true_b, y_prob))
     metrics["gt_positive_rate"] = safe_div(tp + fn, y_true_b.size)
     metrics["pred_positive_rate"] = safe_div(tp + fp, y_true_b.size)
     metrics["n_samples"] = int(y_true_b.size)
@@ -521,6 +524,51 @@ def predict_recording(
     )
 
 
+def prediction_txt_path(predictions_dir: Path, animal_id: str, session_id: str) -> Path:
+    safe_session = session_id.replace("/", "__").replace("\\", "__")
+    return predictions_dir / animal_id / f"{safe_session}_pred.txt"
+
+
+def format_inference_time_s(value: float) -> str:
+    return f"{value:.1f}".replace(".", ",")
+
+
+def write_prediction_txt(path: Path, events: list[tuple[int, int]], sr: float) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        for start, end in events:
+            f.write(
+                f"{format_inference_time_s(start / sr)}\t"
+                f"{format_inference_time_s(end / sr)}\n"
+            )
+
+
+def parse_inference_time_s(value: str) -> float:
+    return float(value.strip().replace(",", "."))
+
+
+def read_prediction_txt(path: Path, sr: float, n_samples: int) -> list[tuple[int, int]]:
+    events: list[tuple[int, int]] = []
+    if not path.exists():
+        return events
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.replace(";", "\t").split()
+            if len(parts) < 2:
+                continue
+            start_s = parse_inference_time_s(parts[0])
+            end_s = parse_inference_time_s(parts[1])
+            start = max(0, min(int(round(start_s * sr)), int(n_samples)))
+            end = max(0, min(int(round(end_s * sr)), int(n_samples)))
+            if end > start:
+                events.append((start, end))
+    events.sort()
+    return events
+
+
 def row_for_pred_event(
     recording_id: str,
     animal_id: str,
@@ -528,11 +576,11 @@ def row_for_pred_event(
     pharmacology_group: str,
     event_idx: int,
     interval: tuple[int, int],
-    probs: np.ndarray,
+    probs: np.ndarray | None,
     sr: float,
 ) -> dict[str, Any]:
     start, end = interval
-    event_probs = probs[start:end]
+    event_probs = probs[start:end] if probs is not None else np.asarray([], dtype=np.float32)
     duration_s = (end - start) / sr
     return {
         "recording_id": recording_id,
@@ -553,11 +601,13 @@ def row_for_pred_event(
 
 def evaluate_recording(
     session_dir: Path,
-    model: torch.nn.Module,
+    model: torch.nn.Module | None,
     inference_cfg: dict[str, Any],
     device: str,
     save_probabilities: bool,
     probabilities_dir: Path,
+    predictions_dir: Path,
+    recompute_predictions: bool,
     global_frame_curves: BinnedCurveAccumulator,
     global_chunk_curves: BinnedCurveAccumulator,
     pharmacology_groups: dict[tuple[str, str], str],
@@ -573,35 +623,47 @@ def evaluate_recording(
     segments_df = pd.read_csv(session_dir / "segments_info.csv")
     gt_events = gt_intervals_from_segments(segments_df)
     gt_mask = mask_from_intervals(gt_events, n_samples)
+    pred_txt = prediction_txt_path(predictions_dir, animal_id, session_id)
 
-    probs = predict_recording(
-        model=model,
-        signals=signals,
-        cfg=inference_cfg,
-        device=device,
-    )
-    if probs.shape[0] != n_samples:
-        probs = probs[:n_samples]
+    probs: np.ndarray | None = None
+    if pred_txt.exists() and not recompute_predictions:
+        print(f"[INFO] Reusing prediction txt: {pred_txt}")
+        pred_events = read_prediction_txt(pred_txt, sr=sr, n_samples=n_samples)
+    else:
+        if model is None:
+            raise RuntimeError(f"Prediction txt is missing and model is not loaded: {pred_txt}")
+        probs = predict_recording(
+            model=model,
+            signals=signals,
+            cfg=inference_cfg,
+            device=device,
+        )
+        if probs.shape[0] != n_samples:
+            probs = probs[:n_samples]
 
-    pred_events = postprocess_samples(
-        probs=probs,
-        sr=sr,
-        onset=float(inference_cfg.get("onset_threshold", 0.3)),
-        offset=float(inference_cfg.get("offset_threshold", 0.15)),
-        min_duration_s=float(inference_cfg.get("min_duration_s", 3.0)),
-        min_gap_s=float(inference_cfg.get("min_gap_s", 2.0)),
-        collar_s=float(inference_cfg.get("collar_s", 0.0)),
-    )
+        pred_events = postprocess_samples(
+            probs=probs,
+            sr=sr,
+            onset=float(inference_cfg.get("onset_threshold", 0.3)),
+            offset=float(inference_cfg.get("offset_threshold", 0.15)),
+            min_duration_s=float(inference_cfg.get("min_duration_s", 3.0)),
+            min_gap_s=float(inference_cfg.get("min_gap_s", 2.0)),
+            collar_s=float(inference_cfg.get("collar_s", 0.0)),
+        )
+        write_prediction_txt(pred_txt, pred_events, sr=sr)
+        print(f"[INFO] Wrote prediction txt: {pred_txt}")
     pred_mask = mask_from_intervals(pred_events, n_samples)
 
     frame_metrics = compute_frame_metrics(gt_mask, probs, pred_mask)
-    global_frame_curves.update(gt_mask, probs)
+    if probs is not None:
+        global_frame_curves.update(gt_mask, probs)
 
     gt_chunk = downsample_mask_to_1hz(gt_mask, sr)
     pred_chunk = downsample_mask_to_1hz(pred_mask, sr)
-    prob_chunk = downsample_prob_to_1hz(probs, sr)
+    prob_chunk = downsample_prob_to_1hz(probs, sr) if probs is not None else None
     chunk_metrics = compute_frame_metrics(gt_chunk, prob_chunk, pred_chunk)
-    global_chunk_curves.update(gt_chunk, prob_chunk)
+    if prob_chunk is not None:
+        global_chunk_curves.update(gt_chunk, prob_chunk)
 
     duration_s = n_samples / sr
     event_metrics: dict[str, dict[str, Any]] = {}
@@ -921,6 +983,7 @@ def write_report(
                 ["checkpoint", inference_cfg.get("checkpoint")],
                 ["train_config", str(args.train_config)],
                 ["inference_config", str(args.inference_config)],
+                ["predictions_dir", str(args.predictions_dir)],
                 ["device", args.device],
             ],
         ),
@@ -1162,6 +1225,7 @@ def write_report(
                     ["recording_metrics.csv", "сводка по записям"],
                     ["animal_summary.csv", "биологическая сводка по животным"],
                     ["pharmacology_group_summary.csv", "сводка по группам drug/no_drug"],
+                    ["predictions/<animal>/*_pred.txt", "кэш predicted events в формате inference.py"],
                     ["predicted_events.csv", "структурированные predicted events"],
                     ["event_matches.csv", "one-to-one event matches для каждого level"],
                 ],
@@ -1210,6 +1274,7 @@ def write_final_outputs(
             "animals": animals,
             "model_name": inference_cfg.get("model_name"),
             "checkpoint": inference_cfg.get("checkpoint"),
+            "predictions_dir": str(args.predictions_dir),
             "device": args.device,
         },
         "event_matching_contract": EVENT_LEVELS,
@@ -1294,9 +1359,13 @@ def run_isolated_recordings(
             args.device,
             "--sessions",
             session_key,
+            "--predictions-dir",
+            str(args.predictions_dir),
         ]
         if args.save_probabilities:
             command.append("--save-probabilities")
+        if args.recompute_predictions:
+            command.append("--recompute-predictions")
 
         print(f"[INFO] [{idx}/{len(session_dirs)}] Isolated evaluation: {session_key}")
         completed = None
@@ -1366,6 +1435,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-recordings", type=int, default=None, help="Optional smoke-test limit.")
     parser.add_argument("--save-probabilities", action="store_true")
     parser.add_argument(
+        "--predictions-dir",
+        default=None,
+        type=Path,
+        help="Directory for inference-style prediction .txt files. Default: <out>/predictions.",
+    )
+    parser.add_argument(
+        "--recompute-predictions",
+        action="store_true",
+        help="Ignore cached prediction .txt files and run model inference again.",
+    )
+    parser.add_argument(
         "--isolate-recordings",
         action="store_true",
         help="Evaluate each recording in a separate subprocess and aggregate outputs.",
@@ -1386,6 +1466,11 @@ def main() -> None:
     args.inference_config = resolve_path(args.inference_config)
     args.out = resolve_path(args.out)
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.predictions_dir is None:
+        args.predictions_dir = args.out / "predictions"
+    else:
+        args.predictions_dir = resolve_path(args.predictions_dir)
+    args.predictions_dir.mkdir(parents=True, exist_ok=True)
 
     train_cfg = load_yaml(args.train_config)
     inference_cfg = load_yaml(args.inference_config)
@@ -1432,7 +1517,16 @@ def main() -> None:
         )
         return
 
-    model = load_model(str(inference_cfg["model_name"]), str(checkpoint))
+    cached_prediction_paths = [
+        prediction_txt_path(args.predictions_dir, session_dir.parent.name, session_dir.name)
+        for session_dir in session_dirs
+    ]
+    needs_model = args.recompute_predictions or any(
+        not path.exists() for path in cached_prediction_paths
+    )
+    model = load_model(str(inference_cfg["model_name"]), str(checkpoint)) if needs_model else None
+    if not needs_model:
+        print(f"[INFO] All prediction txt files found in {args.predictions_dir}; skipping model inference.")
 
     results: list[RecordingResult] = []
     predicted_event_rows: list[dict[str, Any]] = []
@@ -1449,6 +1543,8 @@ def main() -> None:
             device=device,
             save_probabilities=bool(args.save_probabilities),
             probabilities_dir=args.out / "probabilities",
+            predictions_dir=args.predictions_dir,
+            recompute_predictions=bool(args.recompute_predictions),
             global_frame_curves=global_frame_curves,
             global_chunk_curves=global_chunk_curves,
             pharmacology_groups=pharmacology_groups,
