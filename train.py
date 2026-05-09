@@ -14,6 +14,7 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import numpy as np
 import shutil
 from datetime import datetime
+from typing import Optional
 
 # Добавляем путь к модулям проекта
 import sys
@@ -120,6 +121,14 @@ def load_config(config_path: str) -> dict:
     return config
 
 
+def resolve_optional_path(path: Optional[str]) -> Optional[str]:
+    """Resolve a user-provided path while keeping empty config values disabled."""
+    if not path:
+        return None
+    path = os.path.expandvars(os.path.expanduser(str(path)))
+    return path if os.path.isabs(path) else os.path.abspath(path)
+
+
 def main():
     """
     Основная функция для запуска обучения
@@ -130,10 +139,23 @@ def main():
     parser.add_argument('--test', action='store_true',
                         help='Запустить тестирование обученной модели')
     
+    parser.add_argument('--resume-from-checkpoint', type=str, default=None,
+                        help='Path to a Lightning checkpoint to resume training from')
+    parser.add_argument('--max-epochs', type=int, default=None,
+                        help='Override training.num_epochs; this is the total target epoch count')
+
     args = parser.parse_args()
     
     # Загрузка конфигурации
     config = load_config(args.config)
+    if args.resume_from_checkpoint is not None:
+        config.setdefault('training', {})['resume_from_checkpoint'] = args.resume_from_checkpoint
+    if args.max_epochs is not None:
+        config.setdefault('training', {})['num_epochs'] = args.max_epochs
+
+    resume_checkpoint_path = resolve_optional_path(config['training'].get('resume_from_checkpoint'))
+    if resume_checkpoint_path and not os.path.isfile(resume_checkpoint_path):
+        raise FileNotFoundError(f"Resume checkpoint not found: {resume_checkpoint_path}")
     
     # Установка seed для воспроизводимости
     pl.seed_everything(config['experiment']['seed'])
@@ -185,10 +207,13 @@ def main():
     )
     
     # Создание логгера
-    logger = TensorBoardLogger(
-        config['experiment']['log_dir'], 
-        name="epilepsy_detector"
-    )
+    logger_kwargs = {
+        "save_dir": config['experiment']['log_dir'],
+        "name": "epilepsy_detector",
+    }
+    if config['experiment'].get('log_version') is not None:
+        logger_kwargs["version"] = config['experiment']['log_version']
+    logger = TensorBoardLogger(**logger_kwargs)
     experiment_dir = logger.log_dir
     checkpoint_dir = os.path.join(experiment_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -229,7 +254,9 @@ def main():
     
     # Обучение модели
     print("Начало обучения...")
-    trainer.fit(model, datamodule=data_module)
+    if resume_checkpoint_path:
+        print(f"Resuming training from checkpoint: {resume_checkpoint_path}")
+    trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint_path)
     readable_path = ""
 
     # Сохранение лучшего чекпоинта в читаемом виде с указанием модели
