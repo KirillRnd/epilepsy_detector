@@ -2,7 +2,7 @@
 # Использование: python inference.py --edf recording.edf --config inference_config.yaml
 
 model_name: RDSCBiGRUDetector
-checkpoint: experiments/exp_002/checkpoints/RDSCBiGRUDetector-best-val_loss=0.00101.ckpt
+checkpoint: checkpoints/RDSCBiGRUv2.ckpt
 
 # Параметры скользящего окна
 window_length: 2000        # отсчётов (5 сек при 400 Гц)
