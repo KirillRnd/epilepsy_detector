@@ -30,6 +30,10 @@ from src.postprocessing.hysteresis import (
     postprocess_samples,
     precision_recall_f1,
 )
+from src.data_loading.input_normalization import (
+    apply_input_normalization,
+    input_normalization_from_config,
+)
 
 
 DEFAULT_ONSETS = "0.2,0.3,0.4,0.5,0.6,0.7"
@@ -236,14 +240,18 @@ def sliding_inference(
     return prob_sum / count
 
 
-def probability_path(cache_dir: Path, session: dict) -> Path:
+def probability_path(cache_dir: Path, session: dict, input_normalization: str) -> Path:
     safe_session = session["session_id"].replace("/", "__").replace("\\", "__")
-    return cache_dir / session["animal_id"] / f"{safe_session}_probs.npy"
+    return cache_dir / input_normalization / session["animal_id"] / f"{safe_session}_probs.npy"
 
 
-def attach_probability_paths(sessions: list[dict], cache_dir: Path) -> None:
+def attach_probability_paths(
+    sessions: list[dict],
+    cache_dir: Path,
+    input_normalization: str,
+) -> None:
     for session in sessions:
-        session["prob_path"] = probability_path(cache_dir, session)
+        session["prob_path"] = probability_path(cache_dir, session, input_normalization)
 
 
 def needs_probability_recompute(sessions: list[dict], recompute_probs: bool) -> bool:
@@ -279,6 +287,7 @@ def ensure_probabilities(
         if verbose:
             print(f"[{idx}/{len(sessions)}] Running model: {session['key']}")
         signal = np.load(session["signal_path"], mmap_mode="r")
+        signal = apply_input_normalization(signal, args.input_normalization)
         probs = sliding_inference(
             model=model,
             signal=signal,
@@ -478,6 +487,8 @@ def write_results(rows: list[dict], output_csv: Path, best_json: Path) -> None:
 
 def prepare_sessions(args: argparse.Namespace, verbose: bool = True) -> list[dict]:
     config = load_config(Path(args.config) if args.config else None)
+    if args.input_normalization is None:
+        args.input_normalization = input_normalization_from_config(config)
     animals = select_animals(args, config)
     sessions = discover_sessions(
         data_dir=Path(args.data_dir),
@@ -496,7 +507,7 @@ def prepare_sessions(args: argparse.Namespace, verbose: bool = True) -> list[dic
                 f"{len(session['target'])} events"
             )
 
-    attach_probability_paths(sessions, Path(args.prob_cache_dir))
+    attach_probability_paths(sessions, Path(args.prob_cache_dir), args.input_normalization)
     model = None
     if needs_probability_recompute(sessions, args.recompute_probs):
         args.device = resolve_device(args.device)
@@ -546,6 +557,8 @@ def build_worker_command(
         args.metric,
         "--prob-cache-dir",
         args.prob_cache_dir,
+        "--input-normalization",
+        args.input_normalization,
         "--_worker-param-json",
         json.dumps([asdict(params) for params in params_list], separators=(",", ":")),
         "--_worker-output-json",
@@ -651,6 +664,8 @@ def run_worker(args: argparse.Namespace) -> None:
         event_iou_threshold=args.event_iou_threshold,
         min_event_overlap_s=args.min_event_overlap_s,
     )
+    for row in rows:
+        row["input_normalization"] = args.input_normalization
     output_path = Path(args._worker_output_json)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
@@ -707,6 +722,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--prob-cache-dir",
         default="experiments/postprocessing/hysteresis_tuning/probabilities",
     )
+    parser.add_argument(
+        "--input-normalization",
+        default=None,
+        choices=[
+            "none",
+            "per_record_joint_zscore",
+            "per_record_per_channel_zscore",
+            "per_record_joint_robust",
+            "per_record_per_channel_robust",
+        ],
+        help="Full-record input normalization. Defaults to config input_normalization or none.",
+    )
     parser.add_argument("--recompute-probs", action="store_true")
     parser.add_argument(
         "--worker-retries",
@@ -759,6 +786,9 @@ def main() -> None:
                 )
     else:
         rows = run_grid_isolated(args, grid)
+
+    for row in rows:
+        row["input_normalization"] = args.input_normalization
 
     rows.sort(
         key=lambda row: (

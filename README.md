@@ -147,3 +147,83 @@ tensorboard --logdir experiments/exp_001/logs
 - Recall
 - F1-Score
 - Confusion matrix
+
+## Hysteresis tuning + final evaluation for one checkpoint
+
+Run these commands from Docker/Linux inside `/workspace/Epilepsy`.
+
+This workflow keeps hysteresis tuning, validation evaluation, and test evaluation under one experiment folder, so the artifacts can be traced back to the same checkpoint.
+
+Checkpoint used in this example:
+
+```text
+experiments/exp_processed2_logged/logs/epilepsy_detector/version_6/checkpoints/epilepsy-detector-26-val_f1=0.90520.ckpt
+```
+
+### 1. Tune hysteresis on validation split
+
+Use a checkpoint-specific output folder and force probability recomputation. This avoids accidentally reusing probabilities from another model.
+
+```bash
+python -m src.postprocessing.tune_hysteresis --config experiments/config_processed2_resume_version6.yaml --data-dir data/processed2 --checkpoint "experiments/exp_processed2_logged/logs/epilepsy_detector/version_6/checkpoints/epilepsy-detector-26-val_f1=0.90520.ckpt" --model-name RDSCBiGRUDetector --split val --device cuda --output-csv "experiments/postprocessing/hysteresis_tuning/version_6_val_f1_0.90520/results.csv" --best-json "experiments/postprocessing/hysteresis_tuning/version_6_val_f1_0.90520/best_params.json" --prob-cache-dir "experiments/postprocessing/hysteresis_tuning/version_6_val_f1_0.90520/probabilities" --recompute-probs
+```
+
+Expected outputs:
+
+```text
+experiments/postprocessing/hysteresis_tuning/version_6_val_f1_0.90520/results.csv
+experiments/postprocessing/hysteresis_tuning/version_6_val_f1_0.90520/best_params.json
+```
+
+For this checkpoint the selected parameters were:
+
+```yaml
+onset_threshold: 0.7
+offset_threshold: 0.4
+min_duration_s: 2.0
+min_gap_s: 1.0
+collar_s: 0.0
+```
+
+### 2. Create one final evaluation folder and inference config
+
+```bash
+EXP="reports/final_eval/version_6_val_f1_0.90520"; mkdir -p "$EXP"; cp inference_config.yaml "$EXP/inference_config.yaml"; sed -i 's|^checkpoint:.*|checkpoint: experiments/exp_processed2_logged/logs/epilepsy_detector/version_6/checkpoints/epilepsy-detector-26-val_f1=0.90520.ckpt|' "$EXP/inference_config.yaml"
+```
+
+Check that `$EXP/inference_config.yaml` contains the tuned hysteresis parameters from `best_params.json`.
+
+### 3. Evaluate validation split
+
+```bash
+python scripts/evaluate_final_test.py --data-dir data/processed2 --train-config experiments/config_processed2.yaml --inference-config "$EXP/inference_config.yaml" --split val --out "$EXP/val" --device cuda --recompute-predictions --isolate-recordings
+```
+
+### 4. Evaluate locked test split
+
+```bash
+python scripts/evaluate_final_test.py --data-dir data/processed2 --train-config experiments/config_processed2.yaml --inference-config "$EXP/inference_config.yaml" --split test --out "$EXP/test" --device cuda --recompute-predictions --isolate-recordings
+```
+
+Final artifact layout:
+
+```text
+reports/final_eval/version_6_val_f1_0.90520/
+  inference_config.yaml
+  val/
+    report.md
+    metrics.json
+    recording_metrics.csv
+    animal_summary.csv
+    predicted_events.csv
+    event_matches.csv
+  test/
+    report.md
+    metrics.json
+    recording_metrics.csv
+    animal_summary.csv
+    predicted_events.csv
+    event_matches.csv
+```
+
+If CUDA is unavailable, replace `--device cuda` with `--device cpu`.

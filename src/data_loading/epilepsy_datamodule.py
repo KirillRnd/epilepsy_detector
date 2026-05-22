@@ -61,7 +61,9 @@ class EpilepsyDataModule(pl.LightningDataModule):
                  persistent_workers: bool = True,
                  prefetch_factor: int = 2,
                  train_shuffle_mode: str = "block",
-                 block_shuffle_size: int = 4096):
+                 block_shuffle_size: int = 4096,
+                 input_normalization: str = "none",
+                 normalization_stats_path: str | None = None):
         """
         Инициализация DataModule
         
@@ -90,6 +92,8 @@ class EpilepsyDataModule(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.train_shuffle_mode = train_shuffle_mode
         self.block_shuffle_size = block_shuffle_size
+        self.input_normalization = str(input_normalization or "none")
+        self.normalization_stats_path = normalization_stats_path
         
         # Сохраняем списки животных для жёсткого разбиения (если заданы)
         self.train_animals = train_animals
@@ -224,6 +228,8 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 augmentor=augmentor,
                 cache_mode=self.cache_mode,
                 max_open_files=self.max_open_files,
+                input_normalization=self.input_normalization,
+                normalization_stats_path=self.normalization_stats_path,
             )
             
             self.val_dataset = EpilepsyDataset_v2(
@@ -234,6 +240,8 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 augmentor=None,  # <-- без аугментации
                 cache_mode=self.cache_mode,
                 max_open_files=self.max_open_files,
+                input_normalization=self.input_normalization,
+                normalization_stats_path=self.normalization_stats_path,
             )
         
         if stage == "test" or stage is None:
@@ -245,12 +253,15 @@ class EpilepsyDataModule(pl.LightningDataModule):
                 augmentor=None,  # <-- без аугментации
                 cache_mode=self.cache_mode,
                 max_open_files=self.max_open_files,
+                input_normalization=self.input_normalization,
+                normalization_stats_path=self.normalization_stats_path,
             )
         
         # Вывод разбиения животных на сеты
         print(f"Train animals: {train_animals}")
         print(f"Validation animals: {val_animals}")
         print(f"Test animals: {test_animals}")
+        print(f"Input normalization: {self.input_normalization}")
 
     def _dataloader_kwargs(self):
         kwargs = {

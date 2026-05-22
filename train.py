@@ -21,6 +21,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from src.data_loading.epilepsy_datamodule import EpilepsyDataModule
+from src.data_loading.input_normalization import input_normalization_from_config
 from src.modeling.lightning_epilepsy_detector import EpilepsyDetector_v2
 from src.preprocessing.lightning_class_balancer import compute_class_weights
 
@@ -152,6 +153,13 @@ def main():
         config.setdefault('training', {})['resume_from_checkpoint'] = args.resume_from_checkpoint
     if args.max_epochs is not None:
         config.setdefault('training', {})['num_epochs'] = args.max_epochs
+    input_normalization = input_normalization_from_config(config)
+    config['input_normalization'] = input_normalization
+    normalization_stats_path = config['data'].get(
+        'normalization_stats_path',
+        os.path.join(config['experiment']['output_dir'], 'normalization_stats.csv'),
+    )
+    config['data']['normalization_stats_path'] = normalization_stats_path
 
     resume_checkpoint_path = resolve_optional_path(config['training'].get('resume_from_checkpoint'))
     if resume_checkpoint_path and not os.path.isfile(resume_checkpoint_path):
@@ -188,6 +196,8 @@ def main():
         prefetch_factor=config['data'].get('prefetch_factor', 2),
         train_shuffle_mode=config['data'].get('train_shuffle_mode', 'block'),
         block_shuffle_size=config['data'].get('block_shuffle_size', 4096),
+        input_normalization=input_normalization,
+        normalization_stats_path=normalization_stats_path,
     )
     
     # Подготовка данных

@@ -38,6 +38,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import src.modeling  # noqa: F401 - registers model classes
+from src.data_loading.input_normalization import apply_input_normalization
 from src.modeling.model_registry import get_model_class
 from src.postprocessing import postprocess
 
@@ -293,6 +294,7 @@ def main():
     collar        = float(cfg.get('collar_s', 0.0))
     batch_size    = int(cfg.get('batch_size', 64))
     device        = cfg.get('device', 'cuda' if torch.cuda.is_available() else 'cpu')
+    input_normalization = str(cfg.get('input_normalization', 'none'))
 
     if args.output:
         output_path = args.output
@@ -319,6 +321,9 @@ def main():
         )
 
     # 2. Загрузка модели
+    data = apply_input_normalization(data, input_normalization)
+    print(f"[INFO] Input normalization: {input_normalization}")
+
     model = load_model(model_name, checkpoint)
     print(
         f"[INFO] Инференс: окно={window_length} отсч., шаг={step} отсч., "

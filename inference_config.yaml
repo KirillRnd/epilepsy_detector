@@ -3,6 +3,7 @@
 
 model_name: RDSCBiGRUDetector
 checkpoint: checkpoints/RDSCBiGRUv2.ckpt
+input_normalization: per_record_per_channel_robust
 
 # Параметры скользящего окна
 window_length: 2000        # отсчётов (5 сек при 400 Гц)

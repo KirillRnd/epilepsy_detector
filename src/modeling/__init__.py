@@ -10,6 +10,7 @@ from .ConvBiGRUDetector_v3 import ConvBiGRUDetector_v3
 from .MSConvBiGRUDetector import MSConvBiGRUDetector
 from .RDSCBiGRUDetector import RDSCBiGRUDetector
 from .RDSCBiGRUDetector_v2 import RDSCBiGRUDetector_v2
+from .RDSCBiGRUDetector_v3 import RDSCBiGRUDetector_v3
 from .TCNDetector import TCNDetector
 from .UNet1DDetector import UNet1DDetector
 

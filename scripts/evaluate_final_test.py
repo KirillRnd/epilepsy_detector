@@ -37,6 +37,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import src.modeling  # noqa: F401 - registers model classes
+from src.data_loading.input_normalization import (
+    apply_input_normalization,
+    input_normalization_from_config,
+)
 from inference import load_model, sliding_inference
 from src.postprocessing import postprocess_samples
 
@@ -620,6 +624,10 @@ def evaluate_recording(
 
     signals = np.load(session_dir / "processed_signals.npy", mmap_mode="r")
     n_samples = int(signals.shape[1])
+    signals = apply_input_normalization(
+        signals,
+        str(inference_cfg.get("input_normalization", "none")),
+    )
     segments_df = pd.read_csv(session_dir / "segments_info.csv")
     gt_events = gt_intervals_from_segments(segments_df)
     gt_mask = mask_from_intervals(gt_events, n_samples)
@@ -980,6 +988,7 @@ def write_report(
                 ["split", args.split],
                 [f"{args.split}_animals", ", ".join(split_animals)],
                 ["model_name", inference_cfg.get("model_name")],
+                ["input_normalization", inference_cfg.get("input_normalization", "none")],
                 ["checkpoint", inference_cfg.get("checkpoint")],
                 ["train_config", str(args.train_config)],
                 ["inference_config", str(args.inference_config)],
@@ -1273,6 +1282,7 @@ def write_final_outputs(
             "split": args.split,
             "animals": animals,
             "model_name": inference_cfg.get("model_name"),
+            "input_normalization": inference_cfg.get("input_normalization", "none"),
             "checkpoint": inference_cfg.get("checkpoint"),
             "predictions_dir": str(args.predictions_dir),
             "device": args.device,
@@ -1466,14 +1476,20 @@ def main() -> None:
     args.inference_config = resolve_path(args.inference_config)
     args.out = resolve_path(args.out)
     args.out.mkdir(parents=True, exist_ok=True)
-    if args.predictions_dir is None:
-        args.predictions_dir = args.out / "predictions"
-    else:
-        args.predictions_dir = resolve_path(args.predictions_dir)
-    args.predictions_dir.mkdir(parents=True, exist_ok=True)
 
     train_cfg = load_yaml(args.train_config)
     inference_cfg = load_yaml(args.inference_config)
+    input_normalization = str(
+        inference_cfg.get("input_normalization", input_normalization_from_config(train_cfg))
+    )
+    inference_cfg = dict(inference_cfg)
+    inference_cfg["input_normalization"] = input_normalization
+
+    if args.predictions_dir is None:
+        args.predictions_dir = args.out / "predictions" / input_normalization
+    else:
+        args.predictions_dir = resolve_path(args.predictions_dir)
+    args.predictions_dir.mkdir(parents=True, exist_ok=True)
 
     split_key = f"{args.split}_animals"
     animals = list(train_cfg["data"].get(split_key, []))
@@ -1481,7 +1497,6 @@ def main() -> None:
         raise ValueError(f"No animals configured for split '{args.split}' in {args.train_config}")
 
     checkpoint = resolve_path(str(inference_cfg["checkpoint"]))
-    inference_cfg = dict(inference_cfg)
     inference_cfg["checkpoint"] = str(checkpoint)
 
     device = args.device or inference_cfg.get("device") or ("cuda" if torch.cuda.is_available() else "cpu")

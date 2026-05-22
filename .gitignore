@@ -134,6 +134,8 @@ dmypy.json
 Thumbs.db
 
 # Project specific
+.codex_pydeps/
+.tmp/
 data/
 test_data/
 small_test_data/
@@ -142,5 +144,8 @@ test_output/
 test_output_small/
 plots/
 checkpoints/
+experiments/*exp*/
+experiments/postprocessing/
+reports/
 *.npy
 *.npz

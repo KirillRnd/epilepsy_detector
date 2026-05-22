@@ -2,14 +2,25 @@ import torch
 from torch.utils.data import Dataset
 import numpy as np
 import pandas as pd
+import csv
 from pathlib import Path
 from collections import OrderedDict
 from typing import List, Tuple, Dict
 from src.data_loading.augmentations import EEGAugmentor    
+from src.data_loading.input_normalization import (
+    apply_precomputed_input_normalization,
+    fit_input_normalization,
+)
 
 
 class LazySignalMixin:
-    def _init_signal_loading(self, cache_mode: str = "mmap", max_open_files: int = 16):
+    def _init_signal_loading(
+        self,
+        cache_mode: str = "mmap",
+        max_open_files: int = 16,
+        input_normalization: str = "none",
+        normalization_stats_path: str | None = None,
+    ):
         if cache_mode not in {"mmap", "eager"}:
             raise ValueError("cache_mode must be 'mmap' or 'eager'")
         if max_open_files < 1:
@@ -17,7 +28,13 @@ class LazySignalMixin:
 
         self.cache_mode = cache_mode
         self.max_open_files = int(max_open_files)
+        self.input_normalization = str(input_normalization or "none")
+        self.normalization_stats_path = (
+            Path(normalization_stats_path) if normalization_stats_path else None
+        )
         self.data_cache = OrderedDict()
+        self.normalization_params = {}
+        self._normalization_stats_written = set()
 
     def __getstate__(self):
         state = self.__dict__.copy()
@@ -31,11 +48,12 @@ class LazySignalMixin:
         if self.cache_mode != "eager":
             print(
                 f"Lazy signal loading enabled: cache_mode={self.cache_mode}, "
-                f"max_open_files={self.max_open_files}"
+                f"max_open_files={self.max_open_files}, "
+                f"input_normalization={self.input_normalization}"
             )
             return
 
-        print("Preloading signals into RAM...")
+        print(f"Preloading signals into RAM with input_normalization={self.input_normalization}...")
         seen = set()
         for animal_id, session_id, _, _ in self.windows:
             cache_key = (animal_id, session_id)
@@ -44,6 +62,111 @@ class LazySignalMixin:
             seen.add(cache_key)
             self.data_cache[cache_key] = np.load(self._data_file(animal_id, session_id))
         print("Preloading complete!")
+
+    def _write_normalization_stats(
+        self,
+        animal_id: str,
+        session_id: str,
+        stats: dict,
+    ) -> None:
+        if self.normalization_stats_path is None:
+            return
+        cache_key = (animal_id, session_id)
+        if cache_key in self._normalization_stats_written:
+            return
+
+        self.normalization_stats_path.parent.mkdir(parents=True, exist_ok=True)
+        file_exists = self.normalization_stats_path.exists()
+        fieldnames = [
+            "animal_id",
+            "session_id",
+            "recording_id",
+            "input_normalization",
+            "channel",
+            "center",
+            "scale",
+            "raw_mean",
+            "raw_std",
+            "norm_mean",
+            "norm_std",
+            "warning_flags",
+        ]
+        existing_keys = set()
+        if file_exists:
+            with self.normalization_stats_path.open("r", encoding="utf-8", newline="") as handle:
+                for row in csv.DictReader(handle):
+                    existing_keys.add(
+                        (
+                            row.get("animal_id"),
+                            row.get("session_id"),
+                            row.get("input_normalization"),
+                            row.get("channel"),
+                        )
+                    )
+
+        with self.normalization_stats_path.open("a", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            if not file_exists:
+                writer.writeheader()
+            for row in stats.get("rows", []):
+                row_key = (
+                    animal_id,
+                    session_id,
+                    row.get("input_normalization"),
+                    row.get("channel"),
+                )
+                if row_key in existing_keys:
+                    continue
+                writer.writerow(
+                    {
+                        "animal_id": animal_id,
+                        "session_id": session_id,
+                        "recording_id": f"{animal_id}_{session_id}",
+                        **row,
+                    }
+                )
+        self._normalization_stats_written.add(cache_key)
+
+    def _unique_recordings(self):
+        seen = set()
+        for animal_id, session_id, _, _ in self.windows:
+            cache_key = (animal_id, session_id)
+            if cache_key in seen:
+                continue
+            seen.add(cache_key)
+            yield animal_id, session_id
+
+    def _precompute_normalization_if_needed(self) -> None:
+        print(f"Precomputing input normalization stats: {self.input_normalization}")
+        for animal_id, session_id in self._unique_recordings():
+            cache_key = (animal_id, session_id)
+            if cache_key in self.normalization_params:
+                continue
+            if self.input_normalization == "none" and self.normalization_stats_path is None:
+                self.normalization_params[cache_key] = {
+                    "input_normalization": "none",
+                    "center": np.zeros((1, 1), dtype=np.float32),
+                    "scale": np.ones((1, 1), dtype=np.float32),
+                    "warnings": [""],
+                }
+                continue
+            data = np.load(self._data_file(animal_id, session_id), mmap_mode="r")
+            params, stats = fit_input_normalization(
+                data,
+                self.input_normalization,
+                return_stats=True,
+            )
+            self.normalization_params[cache_key] = params
+            self._write_normalization_stats(animal_id, session_id, stats)
+
+    def _normalize_window(self, window_data, animal_id: str, session_id: str):
+        params = self.normalization_params.get((animal_id, session_id))
+        if params is None:
+            raise RuntimeError(
+                "Input normalization parameters were not precomputed for "
+                f"{animal_id}/{session_id}"
+            )
+        return apply_precomputed_input_normalization(window_data, params)
 
     def _get_signal_array(self, animal_id: str, session_id: str):
         cache_key = (animal_id, session_id)
@@ -71,13 +194,20 @@ class EpilepsyDataset_v2(LazySignalMixin, Dataset):
     def __init__(self, data_dir: str, segments_df: pd.DataFrame,
                  window_length: int = 2000, overlap: float = 0.5,
                  augmentor: EEGAugmentor = None,
-                 cache_mode: str = "mmap", max_open_files: int = 16):
+                 cache_mode: str = "mmap", max_open_files: int = 16,
+                 input_normalization: str = "none",
+                 normalization_stats_path: str | None = None):
         self.data_dir = Path(data_dir)
         self.segments_df = segments_df
         self.window_length = window_length
         self.overlap = overlap
         self.step_size = int(window_length * (1 - overlap))
-        self._init_signal_loading(cache_mode=cache_mode, max_open_files=max_open_files)
+        self._init_signal_loading(
+            cache_mode=cache_mode,
+            max_open_files=max_open_files,
+            input_normalization=input_normalization,
+            normalization_stats_path=normalization_stats_path,
+        )
 
         # Сохраняем seizure-интервалы по сессиям (для быстрого построения target в __getitem__)
         self.seizure_intervals: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
@@ -88,6 +218,7 @@ class EpilepsyDataset_v2(LazySignalMixin, Dataset):
         # Создание списка окон по всей записи (с учётом краёв)
         self.windows = self._create_windows()
 
+        self._precompute_normalization_if_needed()
         self._preload_signals_if_needed()
         
         self.augmentor = augmentor
@@ -150,9 +281,8 @@ class EpilepsyDataset_v2(LazySignalMixin, Dataset):
 
         data = self._get_signal_array(animal_id, session_id)
         window_data = data[:, start_sample:end_sample]  # (C, L<=window_length)
-        if self.cache_mode == "mmap":
-            window_data = window_data.copy()
         cur_len = window_data.shape[1]
+        window_data = self._normalize_window(window_data, animal_id, session_id)
 
         # pad справа, если это край и окно короче window_length
         if cur_len < self.window_length:
@@ -192,6 +322,8 @@ class EpilepsyDataset_v3(LazySignalMixin, Dataset):
         augmentor: EEGAugmentor = None,
         cache_mode: str = "mmap",
         max_open_files: int = 16,
+        input_normalization: str = "none",
+        normalization_stats_path: str | None = None,
     ):
         self.data_dir = Path(data_dir)
         self.segments_df = segments_df
@@ -199,7 +331,12 @@ class EpilepsyDataset_v3(LazySignalMixin, Dataset):
         self.overlap = overlap
         self.step_size = int(window_length * (1 - overlap))
         self.seizure_step_size = int(window_length * (1 - seizure_overlap))
-        self._init_signal_loading(cache_mode=cache_mode, max_open_files=max_open_files)
+        self._init_signal_loading(
+            cache_mode=cache_mode,
+            max_open_files=max_open_files,
+            input_normalization=input_normalization,
+            normalization_stats_path=normalization_stats_path,
+        )
 
         # Seizure-интервалы по сессиям (для target и для плотного семплирования)
         self.seizure_intervals: Dict[Tuple[str, str], List[Tuple[int, int]]] = {}
@@ -211,6 +348,7 @@ class EpilepsyDataset_v3(LazySignalMixin, Dataset):
 
         self.windows = self._create_windows()
 
+        self._precompute_normalization_if_needed()
         self._preload_signals_if_needed()
 
         self.augmentor = augmentor
@@ -286,9 +424,8 @@ class EpilepsyDataset_v3(LazySignalMixin, Dataset):
 
         data = self._get_signal_array(animal_id, session_id)
         window_data = data[:, start_sample:end_sample]  # (C, L<=window_length)
-        if self.cache_mode == "mmap":
-            window_data = window_data.copy()
         cur_len = window_data.shape[1]
+        window_data = self._normalize_window(window_data, animal_id, session_id)
 
         # pad справа, если это край и окно короче window_length
         if cur_len < self.window_length:
