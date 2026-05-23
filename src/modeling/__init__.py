@@ -13,6 +13,10 @@ from .RDSCBiGRUDetector_v2 import RDSCBiGRUDetector_v2
 from .RDSCBiGRUDetector_v3 import RDSCBiGRUDetector_v3
 from .TCNDetector import TCNDetector
 from .UNet1DDetector import UNet1DDetector
+from .StagedChannelRDSCBiGRUDetector_v1 import StagedChannelRDSCBiGRUDetector_v1
+from .StagedChannelRDSCBiGRUDetector_v2 import StagedChannelRDSCBiGRUDetector_v2
+from .StagedChannelRDSCBiGRUDetector_v3 import StagedChannelRDSCBiGRUDetector_v3
+from .RDSCBiGRUDetector_ChannelAdapterShared_v1 import RDSCBiGRUDetector_ChannelAdapterShared_v1
 
 # Импортируем другие важные классы для удобства использования
 from .model_registry import get_model_class, list_available_models
