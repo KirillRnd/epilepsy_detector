@@ -71,6 +71,8 @@ class FinalMetricsMarkdownCallback(Callback):
         checkpoint_callback: ModelCheckpoint,
         config: dict,
         readable_checkpoint_path: str = "",
+        last_checkpoint_path: str = "",
+        best_checkpoint_path: str = "",
     ) -> str:
         os.makedirs(experiment_dir, exist_ok=True)
         report_path = os.path.join(experiment_dir, self.filename)
@@ -89,6 +91,10 @@ class FinalMetricsMarkdownCallback(Callback):
         ]
         if readable_checkpoint_path:
             lines.append(f"- Readable checkpoint copy: `{readable_checkpoint_path}`")
+        if last_checkpoint_path:
+            lines.append(f"- Last checkpoint: `{last_checkpoint_path}`")
+        if best_checkpoint_path:
+            lines.append(f"- Best checkpoint copy: `{best_checkpoint_path}`")
         lines.append("")
         lines.extend(self._metrics_table("Validation metrics", self._first_result(val_results)))
         lines.extend(self._metrics_table("Test metrics", self._first_result(test_results)))
@@ -105,6 +111,30 @@ class FinalMetricsMarkdownCallback(Callback):
             f.write("\n".join(lines))
 
         return report_path
+
+
+class CheckpointAliasCallback(Callback):
+    """Keeps stable last.ckpt and best.ckpt aliases during training."""
+
+    def __init__(self, checkpoint_dir: str, checkpoint_callback: ModelCheckpoint):
+        super().__init__()
+        self.last_path = os.path.join(checkpoint_dir, "last.ckpt")
+        self.best_path = os.path.join(checkpoint_dir, "best.ckpt")
+        self.checkpoint_callback = checkpoint_callback
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        trainer.save_checkpoint(self.last_path)
+        print(f"Saved last checkpoint: {self.last_path}")
+
+    def on_validation_end(self, trainer, pl_module):
+        if trainer.sanity_checking:
+            return
+        trainer.save_checkpoint(self.last_path)
+        print(f"Saved last checkpoint: {self.last_path}")
+        best_model_path = self.checkpoint_callback.best_model_path
+        if best_model_path:
+            shutil.copy2(best_model_path, self.best_path)
+            print(f"Saved best checkpoint: {self.best_path}")
 
 
 def load_config(config_path: str) -> dict:
@@ -155,10 +185,13 @@ def main():
         config.setdefault('training', {})['num_epochs'] = args.max_epochs
     input_normalization = input_normalization_from_config(config)
     config['input_normalization'] = input_normalization
-    normalization_stats_path = config['data'].get(
-        'normalization_stats_path',
-        os.path.join(config['experiment']['output_dir'], 'normalization_stats.csv'),
-    )
+    if input_normalization == "none":
+        normalization_stats_path = None
+    else:
+        normalization_stats_path = config['data'].get(
+            'normalization_stats_path',
+            os.path.join(config['experiment']['output_dir'], 'normalization_stats.csv'),
+        )
     config['data']['normalization_stats_path'] = normalization_stats_path
 
     resume_checkpoint_path = resolve_optional_path(config['training'].get('resume_from_checkpoint'))
@@ -246,12 +279,13 @@ def main():
         mode='max'
     )
     final_metrics_callback = FinalMetricsMarkdownCallback()
+    checkpoint_alias_callback = CheckpointAliasCallback(checkpoint_dir, checkpoint_callback)
     
     # Создание тренера
     trainer = pl.Trainer(
         max_epochs=config['training']['num_epochs'],
         logger=logger,
-        callbacks=[checkpoint_callback, early_stop_callback, final_metrics_callback],
+        callbacks=[checkpoint_callback, checkpoint_alias_callback, early_stop_callback, final_metrics_callback],
         accelerator='gpu' if torch.cuda.is_available() and config['experiment']['device'] == 'cuda' else 'cpu',
         devices=1,
         log_every_n_steps=config['training'].get('log_every_n_steps', 10),
@@ -268,6 +302,8 @@ def main():
         print(f"Resuming training from checkpoint: {resume_checkpoint_path}")
     trainer.fit(model, datamodule=data_module, ckpt_path=resume_checkpoint_path)
     readable_path = ""
+    last_path = checkpoint_alias_callback.last_path
+    best_alias_path = checkpoint_alias_callback.best_path
 
     # Сохранение лучшего чекпоинта в читаемом виде с указанием модели
     if checkpoint_callback.best_model_path:
@@ -308,6 +344,8 @@ def main():
         checkpoint_callback=checkpoint_callback,
         config=config,
         readable_checkpoint_path=readable_path,
+        last_checkpoint_path=last_path,
+        best_checkpoint_path=best_alias_path if checkpoint_callback.best_model_path else "",
     )
     print(f"Final metrics saved: {report_path}")
     

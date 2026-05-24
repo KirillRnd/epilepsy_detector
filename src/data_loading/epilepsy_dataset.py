@@ -36,6 +36,15 @@ class LazySignalMixin:
         self.normalization_params = {}
         self._normalization_stats_written = set()
 
+    @staticmethod
+    def _identity_normalization_params() -> dict:
+        return {
+            "input_normalization": "none",
+            "center": np.zeros((1, 1), dtype=np.float32),
+            "scale": np.ones((1, 1), dtype=np.float32),
+            "warnings": [""],
+        }
+
     def __getstate__(self):
         state = self.__dict__.copy()
         state["data_cache"] = OrderedDict()
@@ -137,18 +146,18 @@ class LazySignalMixin:
             yield animal_id, session_id
 
     def _precompute_normalization_if_needed(self) -> None:
+        if self.input_normalization == "none":
+            for animal_id, session_id in self._unique_recordings():
+                self.normalization_params[(animal_id, session_id)] = (
+                    self._identity_normalization_params()
+                )
+            print("Input normalization disabled: skipping stats precompute")
+            return
+
         print(f"Precomputing input normalization stats: {self.input_normalization}")
         for animal_id, session_id in self._unique_recordings():
             cache_key = (animal_id, session_id)
             if cache_key in self.normalization_params:
-                continue
-            if self.input_normalization == "none" and self.normalization_stats_path is None:
-                self.normalization_params[cache_key] = {
-                    "input_normalization": "none",
-                    "center": np.zeros((1, 1), dtype=np.float32),
-                    "scale": np.ones((1, 1), dtype=np.float32),
-                    "warnings": [""],
-                }
                 continue
             data = np.load(self._data_file(animal_id, session_id), mmap_mode="r")
             params, stats = fit_input_normalization(
