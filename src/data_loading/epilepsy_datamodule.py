@@ -62,6 +62,17 @@ class EpilepsyDataModule(pl.LightningDataModule):
                  prefetch_factor: int = 2,
                  train_shuffle_mode: str = "block",
                  block_shuffle_size: int = 4096,
+                 p_time_shift: float = 0.3,
+                 time_shift_mode: str = "cyclic",
+                 time_shift_fill: str = "zero",
+                 p_channel_dropout: float = 0.2,
+                 p_channel_attenuation: float = 0.0,
+                 channel_attenuation_range: list | tuple = (0.2, 0.7),
+                 p_mixup: float = 0.3,
+                 mixup_alpha: float = 0.3,
+                 p_cutmix: float = 0.2,
+                 cutmix_min_len: int = 200,
+                 cutmix_max_len: int = 800,
                  input_normalization: str = "none",
                  normalization_stats_path: str | None = None):
         """
@@ -92,6 +103,17 @@ class EpilepsyDataModule(pl.LightningDataModule):
         self.prefetch_factor = prefetch_factor
         self.train_shuffle_mode = train_shuffle_mode
         self.block_shuffle_size = block_shuffle_size
+        self.p_time_shift = p_time_shift
+        self.time_shift_mode = time_shift_mode
+        self.time_shift_fill = time_shift_fill
+        self.p_channel_dropout = p_channel_dropout
+        self.p_channel_attenuation = p_channel_attenuation
+        self.channel_attenuation_range = tuple(channel_attenuation_range)
+        self.p_mixup = p_mixup
+        self.mixup_alpha = mixup_alpha
+        self.p_cutmix = p_cutmix
+        self.cutmix_min_len = cutmix_min_len
+        self.cutmix_max_len = cutmix_max_len
         self.input_normalization = str(input_normalization or "none")
         self.normalization_stats_path = normalization_stats_path
         
@@ -212,8 +234,12 @@ class EpilepsyDataModule(pl.LightningDataModule):
         augmentor = EEGAugmentor(
             p_noise=0.5, noise_std_range=(0.01, 0.1),
             p_scale=0.5, scale_range=(0.7, 1.3),
-            p_time_shift=0.3, max_shift_samples=80,
-            p_channel_dropout=0.2,
+            p_time_shift=self.p_time_shift, max_shift_samples=80,
+            time_shift_mode=self.time_shift_mode,
+            time_shift_fill=self.time_shift_fill,
+            p_channel_dropout=self.p_channel_dropout,
+            p_channel_attenuation=self.p_channel_attenuation,
+            channel_attenuation_range=self.channel_attenuation_range,
             label_smooth_samples=40,
         )
         
@@ -281,8 +307,11 @@ class EpilepsyDataModule(pl.LightningDataModule):
             raise RuntimeError("Датасет не инициализирован. Вызовите setup() перед train_dataloader().")
         
         collator = MixupCutMixCollator(
-            p_mixup=0.3, mixup_alpha=0.3,
-            p_cutmix=0.2, cutmix_min_len=200, cutmix_max_len=800,
+            p_mixup=self.p_mixup,
+            mixup_alpha=self.mixup_alpha,
+            p_cutmix=self.p_cutmix,
+            cutmix_min_len=self.cutmix_min_len,
+            cutmix_max_len=self.cutmix_max_len,
         )
 
         if self.train_shuffle_mode == "block":

@@ -1,5 +1,7 @@
 # Training config for the combined legacy processed dataset plus result_0 / EDF_july.
 
+input_normalization: none
+
 data:
   data_dir: "data/processed2"
   window_length: 2000  # 5 seconds at 400 Hz
@@ -24,14 +26,14 @@ model:
   window_length: 2000
   num_classes: 2
   dropout_rate: 0.5
-  model_name: "RDSCBiGRUDetector"
+  model_name: "RDSCBiGRUDetector_ChannelAdapterShared_v1"
   class_weights: [1.0, 100.0]
 
 training:
   learning_rate: 0.0003
-  num_epochs: 50
+  num_epochs: 5
   weight_decay: 0.001
-  patience: 20
+  patience: 10
 
 experiment:
   seed: 42

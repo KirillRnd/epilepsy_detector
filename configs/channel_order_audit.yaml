@@ -1,0 +1,82 @@
+# Channel order audit config.
+# Data-only check: no model inference, no probabilities saved, no thresholds,
+# no hysteresis, no frame/event metrics.
+
+# Expected processed-data layout:
+# data/processed2/<animal_id>/<session_id>/processed_signals.npy
+# data/processed2/<animal_id>/<session_id>/seizure_mask.npy
+# optional conversion_metadata.json
+
+data:
+  data_dir: data/processed2
+
+segments:
+  # Primary report segments. Background is usually more stable because it has
+  # many more samples; seizure is used as independent confirmation.
+  report: [background, seizure]
+
+stats:
+  # Robust statistics are estimated from a bounded deterministic sample.
+  # Mean/std/rms are computed exactly from moments.
+  robust_sample_max: 200000
+
+normalization:
+  # Kept for compatibility with the existing normalization audit config.
+  eps: 1.0e-12
+  mad_scale: 1.4826
+
+channel_order_audit:
+  channels: [FrL, FrR, OcR_Hipp]
+  expected_order: [FrL, FrR, OcR_Hipp]
+
+  # Background is the primary decision layer; seizure confirms the same geometry
+  # when there are enough seizure samples.
+  primary_segment: background
+  secondary_segment: seizure
+
+  # Features are computed per recording/channel/segment. log_* features are used
+  # because channel amplitude differences are multiplicative rather than additive.
+  features:
+    - log_std
+    - log_rms
+    - log_iqr
+    - log_mad_scaled
+
+  reference:
+    # Build robust per-channel reference fingerprints from the audited dataset.
+    # If needed later, restrict records via include/exclude lists in code or by
+    # passing a prefiltered raw stats CSV.
+    source: all_records
+    robust_center: median
+    robust_scale: iqr
+    min_records_per_channel_segment: 10
+    min_feature_scale: 0.05
+    # Optional rough contamination control. The script first builds a reference,
+    # scores records, optionally excludes strong non-expected alternatives, and
+    # rebuilds the reference once.
+    exclude_suspicious_iteratively: true
+    exclude_margin: 3.0
+    max_reference_passes: 2
+
+  simple_rank_check:
+    enabled: true
+    # Expected descending order of raw std. This is intentionally a simple sanity
+    # check, not the main decision rule.
+    expected_descending_std_order: [FrL, FrR, OcR_Hipp]
+
+  decisions:
+    # Margin = expected_score - best_score. Positive margin means another
+    # permutation explains the raw channel fingerprint better than declared order.
+    weak_margin: 1.0
+    strong_margin: 2.0
+    very_strong_margin: 3.0
+    require_secondary_agreement_for_likely: true
+    secondary_agreement_min_margin: 1.0
+    # If all permutations score badly and no alternative is clearly better, mark
+    # as possible bad recording/domain shift rather than channel swap.
+    bad_recording_score: 8.0
+
+plots:
+  enabled: true
+  dpi: 140
+  clean_main_dir: true

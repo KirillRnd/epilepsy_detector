@@ -1,0 +1,59 @@
+# Normalization audit config.
+# The report is data-only: no model inference, no hysteresis, no frame/event metrics.
+
+data:
+  data_dir: data/processed2
+
+segments:
+  # Main report segments. The script also computes `all` internally when it is
+  # needed as a normalization fit segment.
+  report: [background, seizure]
+
+stats:
+  # Robust statistics (median/MAD/IQR/percentiles) are estimated from a bounded
+  # deterministic sample. Mean/std/rms are computed exactly from moments.
+  robust_sample_max: 200000
+
+normalization:
+  eps: 1.0e-12
+  mad_scale: 1.4826
+
+  # `none` is a raw baseline used for raw geometry and formulas, but it is not
+  # drawn as a movement normalization in the main figures.
+  methods:
+    - name: none
+      kind: none
+      fit_scope: raw_baseline
+      fit_segment: all
+
+    - name: per_record_per_channel_zscore
+      kind: per_record_per_channel_zscore
+      fit_scope: per_record_per_channel
+      fit_segment: all
+
+    - name: per_record_joint_zscore
+      kind: per_record_joint_zscore
+      fit_scope: per_record_joint_channels
+      fit_segment: all
+
+    - name: per_record_per_channel_robust
+      kind: per_record_per_channel_robust
+      fit_scope: per_record_per_channel
+      fit_segment: all
+
+    - name: per_record_joint_robust
+      kind: per_record_joint_robust
+      fit_scope: per_record_joint_channels
+      fit_segment: all
+
+plots:
+  enabled: true
+  dpi: 140
+  clean_main_dir: true
+
+  # Keep the report readable: only these methods are shown in movement figures.
+  selected_normalizations:
+    - per_record_per_channel_zscore
+    - per_record_joint_zscore
+    - per_record_per_channel_robust
+    - per_record_joint_robust

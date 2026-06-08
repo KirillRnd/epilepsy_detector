@@ -19,7 +19,11 @@ class EEGAugmentor:
         scale_range: Tuple[float, float] = (0.7, 1.3),
         p_time_shift: float = 0.3,
         max_shift_samples: int = 80,  # ±200 мс при 400 Гц
+        time_shift_mode: str = "cyclic",
+        time_shift_fill: str = "zero",
         p_channel_dropout: float = 0.2,
+        p_channel_attenuation: float = 0.0,
+        channel_attenuation_range: Tuple[float, float] = (0.2, 0.7),
         p_mixup: float = 0.3,
         mixup_alpha: float = 0.3,
         p_cutmix: float = 0.2,
@@ -33,7 +37,11 @@ class EEGAugmentor:
         self.scale_range = scale_range
         self.p_time_shift = p_time_shift
         self.max_shift_samples = max_shift_samples
+        self.time_shift_mode = str(time_shift_mode)
+        self.time_shift_fill = str(time_shift_fill)
         self.p_channel_dropout = p_channel_dropout
+        self.p_channel_attenuation = p_channel_attenuation
+        self.channel_attenuation_range = channel_attenuation_range
         self.p_mixup = p_mixup
         self.mixup_alpha = mixup_alpha
         self.p_cutmix = p_cutmix
@@ -64,13 +72,48 @@ class EEGAugmentor:
     def time_shift(
         self, signal: torch.Tensor, target: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Циклический сдвиг по времени (сигнал + метки синхронно)."""
+        """Сдвиг по времени (сигнал + метки синхронно)."""
         if np.random.random() > self.p_time_shift:
             return signal, target
         shift = np.random.randint(-self.max_shift_samples, self.max_shift_samples + 1)
-        signal = torch.roll(signal, shifts=shift, dims=1)
-        target = torch.roll(target, shifts=shift, dims=0)
-        return signal, target
+        if shift == 0:
+            return signal, target
+
+        if self.time_shift_mode == "cyclic":
+            signal = torch.roll(signal, shifts=shift, dims=1)
+            target = torch.roll(target, shifts=shift, dims=0)
+            return signal, target
+
+        if self.time_shift_mode == "noncyclic":
+            return self._noncyclic_time_shift(signal, target, shift)
+
+        raise ValueError("time_shift_mode must be one of: 'cyclic', 'noncyclic'")
+
+    def _noncyclic_time_shift(
+        self, signal: torch.Tensor, target: torch.Tensor, shift: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Сдвиг без wrap-around; освободившийся край заполняется padding-ом."""
+        T = signal.shape[1]
+        abs_shift = min(abs(int(shift)), T)
+        shifted_signal = signal.new_zeros(signal.shape)
+        shifted_target = target.new_zeros(target.shape)
+
+        if shift > 0:
+            shifted_signal[:, abs_shift:] = signal[:, : T - abs_shift]
+            shifted_target[abs_shift:] = target[: T - abs_shift]
+            if self.time_shift_fill == "edge":
+                shifted_signal[:, :abs_shift] = signal[:, :1]
+                shifted_target[:abs_shift] = target[:1]
+        else:
+            shifted_signal[:, : T - abs_shift] = signal[:, abs_shift:]
+            shifted_target[: T - abs_shift] = target[abs_shift:]
+            if self.time_shift_fill == "edge":
+                shifted_signal[:, T - abs_shift :] = signal[:, -1:]
+                shifted_target[T - abs_shift :] = target[-1:]
+
+        if self.time_shift_fill not in ("zero", "edge"):
+            raise ValueError("time_shift_fill must be one of: 'zero', 'edge'")
+        return shifted_signal, shifted_target
 
     def channel_dropout(self, signal: torch.Tensor) -> torch.Tensor:
         """Случайное обнуление одного из каналов."""
@@ -79,6 +122,16 @@ class EEGAugmentor:
         ch = np.random.randint(0, signal.shape[0])
         signal = signal.clone()
         signal[ch] = 0.0
+        return signal
+
+    def channel_attenuation(self, signal: torch.Tensor) -> torch.Tensor:
+        """Случайное мягкое ослабление одного из каналов."""
+        if np.random.random() > self.p_channel_attenuation:
+            return signal
+        ch = np.random.randint(0, signal.shape[0])
+        factor = np.random.uniform(*self.channel_attenuation_range)
+        signal = signal.clone()
+        signal[ch] *= factor
         return signal
 
     # ------------------------------------------------------------------ #
@@ -132,6 +185,7 @@ class EEGAugmentor:
         signal = self.amplitude_scaling(signal)
         signal, target = self.time_shift(signal, target)
         signal = self.channel_dropout(signal)
+        signal = self.channel_attenuation(signal)
         target = self.smooth_boundaries(target)
         return signal, target
 
